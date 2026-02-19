@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+
+      - name: Set variables
+        id: vars
+        run: |
+          TAG="release-$(date +'%Y%m%d-%H%M%S')"
+          NAME=$(basename "${{ github.repository }}")
+          FOLDER="spotify_nowplaying"
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "folder=$FOLDER" >> $GITHUB_OUTPUT
+
+
+      - name: Copy files into release folder
+        run: |
+          mkdir "${{ steps.vars.outputs.folder }}"
+
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitignore' \
+            --exclude='${{ steps.vars.outputs.folder }}' \
+            ./ "${{ steps.vars.outputs.folder }}/"
+
+
+      - name: Create source zip
+        run: |
+          zip -r \
+            "${{ steps.vars.outputs.folder }}-source.zip" \
+            "${{ steps.vars.outputs.folder }}"
+
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+
+      - name: Compile Windows binary
+        run: |
+          GOOS=windows GOARCH=amd64 go build \
+            -o "${{ steps.vars.outputs.folder }}/external/auth_server.exe" \
+            -ldflags="-s -w" \
+            "${{ steps.vars.outputs.folder }}/external/auth_server.go"
+
+
+      - name: Create windows zip
+        run: |
+          zip -r \
+            "${{ steps.vars.outputs.folder }}-windows.zip" \
+            "${{ steps.vars.outputs.folder }}"
+
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.name }} ${{ steps.vars.outputs.tag }}
+          files: |
+            ${{ steps.vars.outputs.folder }}-source.zip
+            ${{ steps.vars.outputs.folder }}-windows.zip
