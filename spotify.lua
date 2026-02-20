@@ -18,9 +18,10 @@ local IMAGE_CACHE_DIR = scriptDir..'/spotify_art'
 local MAX_RETRIES = 5
 
 Spotify.retries = 0
+Spotify.overrideAuthPort = 8888 -- Default port for auth server, can be overridden in INI
 
 -- OAuth Configuration
-local spotifyConfig = ac.storage{
+local oauthConfig = ac.storage{
   clientId = '',
   clientSecret = '',
   refreshToken = '',
@@ -60,7 +61,13 @@ function Spotify.loadConfigFile()
   -- Try to read from settings.ini
   local clientId = iniConfig:get('SPOTIFY', 'CLIENT_ID', '')
   local clientSecret = iniConfig:get('SPOTIFY', 'CLIENT_SECRET', '')
-  local refreshToken = iniConfig:get('SPOTIFY', 'REFRESH_TOKEN', '')
+  local overrideAuthPort = iniConfig:get('SPOTIFY', 'OVERRIDE_AUTH_PORT', '')
+
+  if overrideAuthPort ~= '' then
+    AUTH_SERVER = 'http://127.0.0.1:'..overrideAuthPort
+    Spotify.overrideAuthPort = tonumber(overrideAuthPort)
+  end
+  REDIRECT_URI = AUTH_SERVER..'/callback'
   
   -- Trim whitespace
   if clientId then
@@ -75,15 +82,8 @@ function Spotify.loadConfigFile()
     clientSecret = ''
   end
   
-  if refreshToken then
-    refreshToken = refreshToken:match('^%s*(.-)%s*$') or ''
-  else
-    refreshToken = ''
-  end
-
-  spotifyConfig.clientId = clientId
-  spotifyConfig.clientSecret = clientSecret
-  spotifyConfig.refreshToken = refreshToken
+  oauthConfig.clientId = clientId
+  oauthConfig.clientSecret = clientSecret
 end
 
 -- Save current config to INI file
@@ -95,9 +95,8 @@ function Spotify.saveConfigFile()
     return
   end
   
-  iniConfig:setAndSave('SPOTIFY', 'CLIENT_ID', spotifyConfig.clientId)
-  iniConfig:setAndSave('SPOTIFY', 'CLIENT_SECRET', spotifyConfig.clientSecret)
-  iniConfig:setAndSave('SPOTIFY', 'REFRESH_TOKEN', spotifyConfig.refreshToken)
+  iniConfig:setAndSave('SPOTIFY', 'CLIENT_ID', oauthConfig.clientId)
+  iniConfig:setAndSave('SPOTIFY', 'CLIENT_SECRET', oauthConfig.clientSecret)
   ac.log('Spotify: Config saved to settings.ini')
 end
 
@@ -174,12 +173,12 @@ end
 
 -- Generate auth URL for user to visit
 function Spotify.generateAuthUrl()
-  if spotifyConfig.clientId == '' then
+  if oauthConfig.clientId == '' then
     return nil
   end
   
   local params = {
-    'client_id='..spotifyConfig.clientId,
+    'client_id='..oauthConfig.clientId,
     'response_type=code',
     'redirect_uri='..urlEncode(REDIRECT_URI),  -- URL encode the redirect URI
     'scope='..SCOPE:gsub(' ', '%%20'),
@@ -223,8 +222,8 @@ end
 
 -- Run built-in auth server process if compiled version is available
 function Spotify.runAuthServer()
-  ac.log('Spotify: Trying to start auth server process...')
-  spotifyConfig.authServerRunning = false
+  ac.log('Spotify: Trying to start auth server process on port '..Spotify.overrideAuthPort)
+  oauthConfig.authServerRunning = false
 
   local server_path = scriptDir..'/external/auth_server.exe'
   if not io.exists(server_path) then 
@@ -234,17 +233,18 @@ function Spotify.runAuthServer()
 
   os.runConsoleProcess(
     {
-      filename = scriptDir..'/external/auth_server.exe',
-      arguments = {},
+      filename = server_path,
+      arguments = { server_path, "-port", tostring(Spotify.overrideAuthPort) },
+      rawArguments = true,
       terminateWithScript = true,
       dataCallback = function (err, data)
         if err then
           ac.log('Spotify: Auth server error: ', tostring(err))
-          spotifyConfig.authServerRunning = false
+          oauthConfig.authServerRunning = false
         else
           local datastr = tostring(data)
           if datastr:match('Listening') then
-            spotifyConfig.authServerRunning = true
+            oauthConfig.authServerRunning = true
             ac.log('Spotify: Auth server is now running')
           end
 
@@ -255,7 +255,7 @@ function Spotify.runAuthServer()
         end
       end
     }, function (err, data)
-        spotifyConfig.authServerRunning = false
+        oauthConfig.authServerRunning = false
     end
   )
 end
@@ -263,7 +263,7 @@ end
 -- Exchange authorization code for refresh token
 function Spotify.exchangeAuthCode(authCode, callback)
 
-  if spotifyConfig.clientId == '' or spotifyConfig.clientSecret == '' then
+  if oauthConfig.clientId == '' or oauthConfig.clientSecret == '' then
     if callback then callback(true, 'Client ID or Secret not configured') end
     return
   end
@@ -271,7 +271,7 @@ function Spotify.exchangeAuthCode(authCode, callback)
   playbackState.loading = true
   playbackState.error = ''
   
-  local auth = base64Encode(spotifyConfig.clientId..':'..spotifyConfig.clientSecret)
+  local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
   
   local exchange_headers = {}
   exchange_headers['Authorization'] = 'Basic '..auth
@@ -308,9 +308,9 @@ function Spotify.exchangeAuthCode(authCode, callback)
       local expiresIn = tonumber(json["expires_in"]) or 3600
 
       if accessToken and refreshToken then
-        spotifyConfig.accessToken = accessToken
-        spotifyConfig.refreshToken = refreshToken
-        spotifyConfig.tokenExpiry = os.clock() + expiresIn
+        oauthConfig.accessToken = accessToken
+        oauthConfig.refreshToken = refreshToken
+        oauthConfig.tokenExpiry = os.clock() + expiresIn
         playbackState.error = ''
         -- Save tokens to INI file
         Spotify.saveConfigFile()
@@ -328,17 +328,17 @@ end
 
 -- Refresh access token using refresh token
 function Spotify.refreshAccessToken(callback)
-  if spotifyConfig.refreshToken == '' then
+  if oauthConfig.refreshToken == '' then
     if callback then callback(true, 'No refresh token available') end
     return
   end
   
-  local auth = base64Encode(spotifyConfig.clientId..':'..spotifyConfig.clientSecret)
+  local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
 
   local refresh_headers = {}
   refresh_headers['Authorization'] = 'Basic '..auth
   refresh_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-  local refresh_body = 'grant_type=refresh_token&refresh_token='..spotifyConfig.refreshToken
+  local refresh_body = 'grant_type=refresh_token&refresh_token='..oauthConfig.refreshToken
 
   web.post(
     SPOTIFY_TOKEN_URL,
@@ -365,8 +365,8 @@ function Spotify.refreshAccessToken(callback)
       if accessToken then
         ac.log("Token Refreshed")
         ui.toast(ui.Icons.Info, 'Token refreshed successfully')
-        spotifyConfig.accessToken = accessToken
-        spotifyConfig.tokenExpiry = os.clock() + expiresIn
+        oauthConfig.accessToken = accessToken
+        oauthConfig.tokenExpiry = os.clock() + expiresIn
         Spotify.saveConfigFile()
         if callback then callback(false, 'Token refreshed') end
       else
@@ -380,12 +380,12 @@ end
 
 -- Check if token is expired and refresh if needed
 function Spotify.ensureValidToken(callback)
-  if spotifyConfig.accessToken == '' then
+  if oauthConfig.accessToken == '' then
     if callback then callback(true, 'Not authenticated') end
     return false
   end
   
-  if os.clock() > spotifyConfig.tokenExpiry - 60 then
+  if os.clock() > oauthConfig.tokenExpiry - 60 then
     Spotify.refreshAccessToken(callback)
     return false
   end
@@ -403,7 +403,7 @@ function Spotify.getVolume(callback)
     end
 
     local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..spotifyConfig.accessToken
+    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
 
     web.request('GET',
       SPOTIFY_API_URL..'/me/player/devices',
@@ -440,7 +440,7 @@ function Spotify.setVolume(volume, callback)
     end
 
     local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..spotifyConfig.accessToken
+    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
     auth_headers['Content-Type'] = 'application/json'
 
     web.request('PUT',
@@ -469,7 +469,7 @@ function Spotify.playerCommand(action, callback)
     end
 
     local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..spotifyConfig.accessToken
+    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
 
     local endpoint = SPOTIFY_API_URL..'/me/player/'..action
     local method = (action == 'pause' or action == 'play') and 'PUT' or 'POST'
@@ -521,7 +521,7 @@ function Spotify.getCurrentTrack(callback)
     playbackState.error = ''
 
     local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..spotifyConfig.accessToken
+    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
 
     web.request('GET',
       SPOTIFY_API_URL..'/me/player/currently-playing',
@@ -619,20 +619,20 @@ function Spotify.clearPlaybackState()
 end
 
 -- Get current playback state
-function Spotify.getState()
+function Spotify.getPlaybackState()
   return playbackState
 end
 
 -- Get config (for settings UI)
-function Spotify.getConfig()
-  return spotifyConfig
+function Spotify.getOauthConfig()
+  return oauthConfig
 end
 
 -- Update config (from settings) and persist to INI
 function Spotify.setConfig(newConfig)
-  spotifyConfig.clientId = newConfig.clientId or spotifyConfig.clientId
-  spotifyConfig.clientSecret = newConfig.clientSecret or spotifyConfig.clientSecret
-  spotifyConfig.refreshToken = newConfig.refreshToken or spotifyConfig.refreshToken
+  oauthConfig.clientId = newConfig.clientId or oauthConfig.clientId
+  oauthConfig.clientSecret = newConfig.clientSecret or oauthConfig.clientSecret
+  oauthConfig.refreshToken = newConfig.refreshToken or oauthConfig.refreshToken
   -- Save to INI file
   Spotify.saveConfigFile()
 end
