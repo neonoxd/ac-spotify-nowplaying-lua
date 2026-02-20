@@ -1,30 +1,43 @@
 local spotify = require('spotify')
-local spotifyRefreshTimer = 0
-local spotifyVolumeTimer = 0
-local spotifyAuthCodeInput = ''
 local REFRESH_INTERVAL = 5 -- seconds between API calls
 local VOLUME_UPDATE_INTERVAL = 1 -- seconds between checking if we should update volume
 
 local settings_showSpotifyLink = false
 local settings_showControls = false
-
+local spotifyRefreshTimer = REFRESH_INTERVAL + 1
+local spotifyVolumeTimer = 0
+local spotifyAuthCodeInput = ''
 local volumeChanged = false
 
+local authUrl = nil
+local authUrlGenerated = false
+
 -- Load config from INI file on startup
-spotify.getConfig().authServerRunning = false
-spotify.getCurrentTrack()
+spotify.getOauthConfig().authServerRunning = false
 
 function script.windowMain(dt)
+  local state = spotify.getPlaybackState()
+  local config = spotify.getOauthConfig()
 
-  local state = spotify.getState()
-  ac.debug('trackName: ', state.trackName)
-  ac.debug('artistName: ', state.artistName)
-  ac.debug('albumName: ', state.albumName)
-  ac.debug('isPlaying: ', state.isPlaying)
-  ac.debug('duration: ', state.duration)
-  ac.debug('progress: ', state.progress)
-  ac.debug('error: ', state.error)
-  ac.debug('volume: ', state.volume)
+  -- DEBUG
+  ac.debug('..trackName: ', state.trackName)
+  ac.debug('..artistName: ', state.artistName)
+  ac.debug('..albumName: ', state.albumName)
+  ac.debug('..isPlaying: ', state.isPlaying)
+  ac.debug('..duration: ', state.duration)
+  ac.debug('..progress: ', state.progress)
+  ac.debug('..error: ', state.error)
+  ac.debug('..volume: ', state.volume)
+
+  -- If not authenticated, show message and return early
+  if config.refreshToken == '' or config.accessToken == '' then
+    ui.beginOutline()
+    ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 1, 0, 1))
+    ui.textWrapped('Please authenticate with Spotify in the settings tab (Top Right of the window) to display now playing information.')
+    ui.popStyleColor()
+    ui.endOutline(rgbm(0, 0, 0, ac.windowFading()), 1)
+    return
+  end
 
   spotifyRefreshTimer = spotifyRefreshTimer + dt
   spotifyVolumeTimer = spotifyVolumeTimer + dt
@@ -54,6 +67,7 @@ function script.windowMain(dt)
     ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 0.2, 0.2, 1))
     ui.textWrapped(state.error)
     ui.popStyleColor()
+    return
   end
 
   if state.trackName and state.trackName ~= 'Nothing playing' then
@@ -89,6 +103,7 @@ function script.windowMain(dt)
         if state.duration > 0 then
           if state.isPlaying then
             state.progress = state.progress + (dt * 1000)
+            state.progress = math.min(state.progress, state.duration)
           end
           local progressPercent = (state.progress / state.duration) * 100
           local durationMin = math.floor(state.duration / 1000 / 60)
@@ -156,15 +171,13 @@ function script.windowMain(dt)
   ui.endOutline(rgbm(0, 0, 0, ac.windowFading()), 1)
 end
 
-local authUrl = nil
-local authUrlGenerated = false
 function script.windowSettings(dt)
-  local config = spotify.getConfig()
-  ac.debug('clientId: ', config.clientId)
-  --ac.debug('clientSecret: ', config.clientSecret)
-  --ac.debug('refreshToken: ', config.refreshToken)
-  --ac.debug('accessToken: ', config.accessToken)
-  ac.debug('tokenExpiry: ', config.tokenExpiry)
+  local config = spotify.getOauthConfig()
+  --ac.debug('_clientId: ', config.clientId)
+  --ac.debug('_clientSecret: ', config.clientSecret)
+  --ac.debug('_refreshToken: ', config.refreshToken)
+  --ac.debug('_accessToken: ', config.accessToken)
+  --ac.debug('_tokenExpiry: ', config.tokenExpiry)
   
   ui.text('Spotify API Configuration')
   ui.separator()
@@ -212,7 +225,7 @@ function script.windowSettings(dt)
 
     if not config.authServerRunning and authUrlGenerated then
       ui.setNextItemWidth(ui.availableSpaceX() * 0.7)
-      spotifyAuthCodeInput = ui.inputText('##authCode', spotifyAuthCodeInput, vec2(128,128))
+      spotifyAuthCodeInput = ui.inputText('##authCode', spotifyAuthCodeInput)
       ui.sameLine()
       ui.text('Auth Code')
       if ui.button('2. Exchange Code for Token', vec2(ui.availableSpaceX(), 0)) then
