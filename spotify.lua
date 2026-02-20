@@ -11,14 +11,14 @@ local settingsPath = scriptDir .. '/settings.ini'
 local SPOTIFY_AUTH_URL = 'https://accounts.spotify.com/authorize'
 local SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'
 local SPOTIFY_API_URL = 'https://api.spotify.com/v1'
-local AUTH_SERVER = 'http://127.0.0.1:8888'
+local AUTH_SERVER = 'http://127.0.0.1:9876'
 local REDIRECT_URI = AUTH_SERVER..'/callback'
 local SCOPE = 'user-read-currently-playing user-read-playback-state user-modify-playback-state'
 local IMAGE_CACHE_DIR = scriptDir..'/spotify_art'
 local MAX_RETRIES = 5
 
 Spotify.retries = 0
-Spotify.overrideAuthPort = 8888 -- Default port for auth server, can be overridden in INI
+Spotify.overrideAuthPort = 9876 -- Default port for auth server, can be overridden in INI
 
 -- OAuth Configuration
 local oauthConfig = ac.storage{

@@ -23,7 +23,7 @@ https://github.com/user-attachments/assets/ced3df6f-4d0b-4505-b74e-303ea7de077d
    - Visit https://developer.spotify.com/dashboard
    - Create a new app
    - Copy your Client ID and Client Secret
-   - Add `http://127.0.0.1:8888/callback` redirect URI under Basic Information
+   - Add `http://127.0.0.1:9876/callback` redirect URI under Basic Information
 
 2. **Configure the app**
    - Open `settings.ini`

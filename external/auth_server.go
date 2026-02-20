@@ -19,7 +19,7 @@ type AuthCode struct {
 var (
 	authCode AuthCode
 	mu       sync.Mutex
-	port     = flag.String("port", "8888", "Port to listen on")
+	port     = flag.String("port", "9876", "Port to listen on")
 )
 
 func init() {
