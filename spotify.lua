@@ -19,6 +19,7 @@ local MAX_RETRIES = 5
 
 Spotify.retries = 0
 Spotify.overrideAuthPort = 9876 -- Default port for auth server, can be overridden in INI
+Spotify.authServerRunning = false
 
 -- OAuth Configuration
 local oauthConfig = ac.storage{
@@ -27,7 +28,6 @@ local oauthConfig = ac.storage{
   refreshToken = '',
   accessToken = '',
   tokenExpiry = 0,
-  authServerRunning = false,
 }
 
 Spotify.appSettings = ac.storage{
@@ -37,8 +37,8 @@ Spotify.appSettings = ac.storage{
 }
 
 -- Playback state
-local playbackState = {
-  trackName = 'Not initialized',
+Spotify.playbackState = {
+  trackName = 'Nothing playing',
   artistName = '',
   albumName = '',
   albumArtUrl = '',
@@ -47,15 +47,10 @@ local playbackState = {
   duration = 0,
   progress = 0,
   error = '',
-  loading = false,
   lastUpdate = 0,
   trackUrl = '',
   volume = 0,
 }
-
-function Spotify.getImageCacheDir()
-  return IMAGE_CACHE_DIR
-end
 
 -- Load config from INI file to ac.storage
 function Spotify.loadConfigFile()
@@ -233,7 +228,7 @@ end
 -- Run built-in auth server process if compiled version is available
 function Spotify.runAuthServer()
   ac.log('Spotify: Trying to start auth server process on port '..Spotify.overrideAuthPort)
-  oauthConfig.authServerRunning = false
+  Spotify.authServerRunning = false
 
   local server_path = scriptDir..'/external/auth_server.exe'
   if not io.exists(server_path) then 
@@ -250,11 +245,11 @@ function Spotify.runAuthServer()
       dataCallback = function (err, data)
         if err then
           ac.log('Spotify: Auth server error: ', tostring(err))
-          oauthConfig.authServerRunning = false
+          Spotify.authServerRunning = false
         else
           local datastr = tostring(data)
           if datastr:match('Listening') then
-            oauthConfig.authServerRunning = true
+            Spotify.authServerRunning = true
             ac.log('Spotify: Auth server is now running')
           end
 
@@ -265,7 +260,7 @@ function Spotify.runAuthServer()
         end
       end
     }, function (err, data)
-        oauthConfig.authServerRunning = false
+        Spotify.authServerRunning = false
     end
   )
 end
@@ -278,27 +273,14 @@ function Spotify.exchangeAuthCode(authCode, callback)
     return
   end
   
-  playbackState.loading = true
-  playbackState.error = ''
+  Spotify.playbackState.error = ''
   
-  local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
-  
-  local exchange_headers = {}
-  exchange_headers['Authorization'] = 'Basic '..auth
-  exchange_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-  local exchange_body = 'grant_type=authorization_code&code='..authCode..'&redirect_uri='..urlEncode(REDIRECT_URI)
-
-  web.post(
-    SPOTIFY_TOKEN_URL,
-    exchange_headers,
-    exchange_body,
-    function(err, response)
+  Spotify._ExchangeAuthCode(authCode, function(err, response)
       if callback then callback(err, response) end
-      playbackState.loading = false
-
+      
       -- Handle failed request
       if err then
-        playbackState.error = 'Token exchange failed: '..tostring(err)
+        Spotify.playbackState.error = 'Token exchange failed: '..tostring(err)
         if callback then callback(true, 'Token exchange failed: '..tostring(err)) end
         ac.log('Spotify: Token exchange error: '..tostring(err))
         return
@@ -306,7 +288,7 @@ function Spotify.exchangeAuthCode(authCode, callback)
 
       local responseBody = response["body"]
       if not responseBody or responseBody == '' then
-        playbackState.error = 'Empty response from Spotify'
+        Spotify.playbackState.error = 'Empty response from Spotify'
         if callback then callback(true, 'Empty response') end
         return
       end
@@ -320,14 +302,14 @@ function Spotify.exchangeAuthCode(authCode, callback)
       if accessToken and refreshToken then
         oauthConfig.accessToken = accessToken
         oauthConfig.refreshToken = refreshToken
-        oauthConfig.tokenExpiry = os.clock() + expiresIn
-        playbackState.error = ''
+        oauthConfig.tokenExpiry = os.time() + expiresIn
+        Spotify.playbackState.error = ''
         -- Save tokens to INI file
         Spotify.saveConfigFile()
         if callback then callback(false, 'Authentication successful') end
         ac.log('Spotify: Successfully authenticated')
       else
-        playbackState.error = 'Failed to extract tokens from response'
+        Spotify.playbackState.error = 'Failed to extract tokens from response'
         if callback then callback(true, 'Token extraction failed') end
         ac.log('Spotify: Token extraction failed. Response: '..responseBody)
       end
@@ -339,27 +321,19 @@ end
 -- Refresh access token using refresh token
 function Spotify.refreshAccessToken(callback)
   if oauthConfig.refreshToken == '' then
+    ui.toast(ui.Icons.Warning, 'Refresh failed: No refresh token available')
     if callback then callback(true, 'No refresh token available') end
     return
   end
   
-  local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
-
-  local refresh_headers = {}
-  refresh_headers['Authorization'] = 'Basic '..auth
-  refresh_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-  local refresh_body = 'grant_type=refresh_token&refresh_token='..oauthConfig.refreshToken
-
-  web.post(
-    SPOTIFY_TOKEN_URL,
-    refresh_headers,
-    refresh_body,
+  Spotify._RefreshToken(
     function(err, response)
       if callback then callback(err, response) end
 
       -- Handle failed request
       if err then
-        playbackState.error = 'Token refresh failed: '..tostring(err)
+        Spotify.playbackState.error = 'Token refresh failed: '..tostring(err)
+        ui.toast(ui.Icons.Warning, 'Refresh failed: '..tostring(err))
         if callback then callback(true, tostring(err)) end
         return
       end
@@ -376,11 +350,12 @@ function Spotify.refreshAccessToken(callback)
         ac.log("Token Refreshed")
         ui.toast(ui.Icons.Info, 'Token refreshed successfully')
         oauthConfig.accessToken = accessToken
-        oauthConfig.tokenExpiry = os.clock() + expiresIn
+        oauthConfig.tokenExpiry = os.time() + expiresIn
         Spotify.saveConfigFile()
         if callback then callback(false, 'Token refreshed') end
       else
-        playbackState.error = 'Failed to extract access token'
+        Spotify.playbackState.error = 'Failed to extract access token'
+        ui.toast(ui.Icons.Warning, 'Refresh failed: Could not extract access token from response')
         if callback then callback(true, 'Token extraction failed') end
       end
 
@@ -392,10 +367,12 @@ end
 function Spotify.ensureValidToken(callback)
   if oauthConfig.accessToken == '' then
     if callback then callback(true, 'Not authenticated') end
+    Spotify.clearPlaybackState()
+    Spotify.playbackState.error = 'Authentication required'
     return false
   end
   
-  if os.clock() > oauthConfig.tokenExpiry - 60 then
+  if os.time() > oauthConfig.tokenExpiry - 60 then
     Spotify.refreshAccessToken(callback)
     return false
   end
@@ -406,107 +383,95 @@ end
 
 -- Get Current Volume
 function Spotify.getVolume(callback)
-  Spotify.ensureValidToken(function(ensure_token_err)
-    if ensure_token_err then
-      if callback then callback(true, 'Not authenticated') end
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
       return
     end
 
-    local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
-
-    web.request('GET',
-      SPOTIFY_API_URL..'/me/player/devices',
-      auth_headers, '', function(err, response)
-        if err then
-          if callback then callback(true, tostring(err)) end
-          return
-        end
-
-        local responseBody = response["body"]
-        local json = JSON.parse(responseBody)
-        local devices = json.devices or {}
-        local volume = nil
-        for _, device in ipairs(devices) do
-          if device.is_active then
-            volume = device.volume_percent
-            playbackState.volume = volume
-            break
-          end
-        end
-
-        if callback then callback(false, volume) end
+    Spotify._GetVolume(function(err, response)
+      if err then 
+        if callback then callback(true, tostring(err)) end
+        return
       end
-    )
+
+      local responseBody = response["body"]
+      local json = JSON.parse(responseBody)
+      local devices = json.devices or {}
+      local volume = nil
+      for _, device in ipairs(devices) do
+        if device.is_active then
+          volume = device.volume_percent
+          Spotify.playbackState.volume = volume
+          break
+        end
+      end
+
+    end)
   end)
 end
 
 -- Set Volume
 function Spotify.setVolume(volume, callback)
-  Spotify.ensureValidToken(function(ensure_token_err)
-    if ensure_token_err then
-      if callback then callback(true, 'Not authenticated') end
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
       return
     end
 
-    local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
-    auth_headers['Content-Type'] = 'application/json'
-
-    web.request('PUT',
-      SPOTIFY_API_URL..'/me/player/volume?volume_percent='..math.floor(volume),
-      auth_headers, '', function(err, response)
-        if err then
-          if callback then callback(true, tostring(err)) end
-          return
-        end
-
-        playbackState.volume = volume
-        if callback then callback(false, '') end
+    Spotify._SetVolume(volume, function(err, response)
+      if err then 
+        if callback then callback(true, tostring(err)) end
+        return
       end
-    )
+
+      Spotify.playbackState.volume = volume
+      if callback then callback(false, volume) end
+    end)
+    
   end)
 end
 
--- Skip Current Track
+-- Send Player Command
 function Spotify.playerCommand(action, callback)
-  Spotify.ensureValidToken(function(ensure_token_err)
-    if ensure_token_err then
-      playbackState.error = 'Authentication required'
-      Spotify.clearPlaybackState()
-      if callback then callback(true, 'Not authenticated') end
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
       return
     end
 
-    local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
-
-    local endpoint = SPOTIFY_API_URL..'/me/player/'..action
-    local method = (action == 'pause' or action == 'play') and 'PUT' or 'POST'
-
-    web.request(method,
-      endpoint,
-      auth_headers, '', function(err, response)
-        if err then
-          playbackState.error = 'Failed to execute player command: '..tostring(err)
-          if callback then callback(true, tostring(err)) end
-          return
-        end
-
-        if action == 'pause' then
-          playbackState.isPlaying = false
-        end
-
-        if action == 'play' then
-          playbackState.isPlaying = true
-        end
-
-        -- Refresh current track info after skipping
-        Spotify.getCurrentTrack()
-
+    Spotify._PlayerCommand(action, function(err, response)
+      if err then 
+        if callback then callback(true, tostring(err)) end
+        return
       end
-    )
+
+      if callback then callback(false, action) end
+    end)
+
   end)
+end
+
+-- Skip Track
+function Spotify.nextTrack()
+  Spotify.playerCommand('next')
+end
+
+-- Previous Track
+function Spotify.prevTrack()
+  Spotify.playerCommand('previous')
+end
+
+-- Play
+function Spotify.play()
+  Spotify.playerCommand('play')
+  Spotify.playbackState.isPlaying = true
+end
+
+-- Pause
+function Spotify.pause()
+  Spotify.playerCommand('pause')
+  Spotify.playbackState.isPlaying = false
 end
 
 -- Fetch currently playing track
@@ -514,47 +479,38 @@ function Spotify.getCurrentTrack(callback)
 
   -- Prevent infinite retry loops
   if Spotify.retries >= MAX_RETRIES then
-    playbackState.error = 'Maximum retries reached. Please check your authentication.'
+    Spotify.playbackState.error = 'Maximum retries reached. Please check your authentication.'
     if callback then callback(true, 'Max retries reached') end
     return
   end
 
-  Spotify.ensureValidToken(function(ensure_token_err)
-    if ensure_token_err then
-      playbackState.error = 'Authentication required'
-      Spotify.clearPlaybackState()
-      if callback then callback(true, 'Not authenticated') end
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
       return
     end
     
-    if not playbackState.is_playing then playbackState.loading = true end
-    playbackState.error = ''
+    Spotify.playbackState.error = ''
 
-    local auth_headers = {}
-    auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+    Spotify._GetCurrentlyPlaying(function(err, response)
 
-    web.request('GET',
-      SPOTIFY_API_URL..'/me/player/currently-playing',
-      auth_headers, '', function(err, response)
-
-        playbackState.loading = false
         -- Handle failed request
         if err then
-          playbackState.error = 'Failed to fetch track: '..tostring(err)
+          Spotify.playbackState.error = 'Failed to fetch track: '..tostring(err)
           if callback then callback(true, tostring(err)) end
           ac.log('Spotify: Fetch error: '..tostring(err))
           return
         end
 
-        local responseBody = response["body"]        
+        local responseBody = response["body"]
         local json = JSON.parse(responseBody)
         if response["status"] == 401 and json and json.error and json.error.message == 'The access token expired' then
-          playbackState.error = 'Unauthorized. Trying to automatically refresh token.'
+          Spotify.playbackState.error = 'Unauthorized. Trying to automatically refresh token.'
           --if callback then callback(true, 'Unauthorized') end
 
           Spotify.refreshAccessToken(function(refresh_err, refresh_message)
             if refresh_err then
-              playbackState.error = 'Token refresh failed: '..refresh_message
+              Spotify.playbackState.error = 'Token refresh failed: '..refresh_message
               Spotify.retries = Spotify.retries + 1
               if callback then callback(true, 'Token refresh failed') end
             end
@@ -565,10 +521,10 @@ function Spotify.getCurrentTrack(callback)
 
         -- Handle empty response / (no track playing)
         if not responseBody or responseBody == '' then
-          playbackState.trackName = 'Nothing playing'
-          playbackState.artistName = ''
-          playbackState.albumName = ''
-          playbackState.isPlaying = false
+          Spotify.playbackState.trackName = 'Nothing playing'
+          Spotify.playbackState.artistName = ''
+          Spotify.playbackState.albumName = ''
+          Spotify.playbackState.isPlaying = false
           if callback then callback(false, '') end
           return
         end
@@ -576,43 +532,43 @@ function Spotify.getCurrentTrack(callback)
         local json = JSON.parse(responseBody)
 
         -- Extract data from parsed JSON
-        playbackState.isPlaying = json.is_playing or false
-        playbackState.progress = json.progress_ms or 0
+        Spotify.playbackState.isPlaying = json.is_playing or false
+        Spotify.playbackState.progress = json.progress_ms or 0
         
         if json.item then
-          playbackState.trackName = json.item.name or 'Unknown Track'
-          playbackState.duration = json.item.duration_ms or 0
+          Spotify.playbackState.trackName = json.item.name or 'Unknown Track'
+          Spotify.playbackState.duration = json.item.duration_ms or 0
           
           if json.item.artists and #json.item.artists > 0 then
-            playbackState.artistName = json.item.artists[1].name or 'Unknown Artist'
+            Spotify.playbackState.artistName = json.item.artists[1].name or 'Unknown Artist'
           end
 
           if json.item.external_urls and json.item.external_urls.spotify then
-            playbackState.trackUrl = json.item.external_urls.spotify
+            Spotify.playbackState.trackUrl = json.item.external_urls.spotify
           else
-            playbackState.trackUrl = ''
+            Spotify.playbackState.trackUrl = ''
           end
           
           if json.item.album then
-            playbackState.albumName = json.item.album.name or ''
+            Spotify.playbackState.albumName = json.item.album.name or ''
             
             if json.item.album.images and #json.item.album.images > 0 then
               local imageUrl = json.item.album.images[1].url
-              playbackState.albumArtUrl = imageUrl
+              Spotify.playbackState.albumArtUrl = imageUrl
               
               if Spotify.appSettings.enableCache then
                 -- Generate hash for filename
                 local albumHash = hashString(imageUrl)
-                playbackState.albumArtPath = downloadAlbumArt(imageUrl, albumHash)
+                Spotify.playbackState.albumArtPath = downloadAlbumArt(imageUrl, albumHash)
               else
-                playbackState.albumArtPath = ''
+                Spotify.playbackState.albumArtPath = ''
               end
             end
           end
         end
         
-        playbackState.lastUpdate = os.clock()
-        playbackState.error = ''
+        Spotify.playbackState.lastUpdate = os.time()
+        Spotify.playbackState.error = ''
         if callback then callback(false, '') end
 
       end
@@ -622,19 +578,14 @@ end
 
 -- Clear playback state (used when auth fails or no track playing)
 function Spotify.clearPlaybackState()
-  playbackState.trackName = 'Not initialized'
-  playbackState.artistName = ''
-  playbackState.albumName = ''
-  playbackState.albumArtUrl = ''
-  playbackState.albumArtPath = ''
-  playbackState.isPlaying = false
-  playbackState.duration = 0
-  playbackState.progress = 0
-end
-
--- Get current playback state
-function Spotify.getPlaybackState()
-  return playbackState
+  Spotify.playbackState.trackName = 'Nothing playing'
+  Spotify.playbackState.artistName = ''
+  Spotify.playbackState.albumName = ''
+  Spotify.playbackState.albumArtUrl = ''
+  Spotify.playbackState.albumArtPath = ''
+  Spotify.playbackState.isPlaying = false
+  Spotify.playbackState.duration = 0
+  Spotify.playbackState.progress = 0
 end
 
 -- Get config (for settings UI)
@@ -642,13 +593,117 @@ function Spotify.getOauthConfig()
   return oauthConfig
 end
 
--- Update config (from settings) and persist to INI
-function Spotify.setConfig(newConfig)
-  oauthConfig.clientId = newConfig.clientId or oauthConfig.clientId
-  oauthConfig.clientSecret = newConfig.clientSecret or oauthConfig.clientSecret
-  oauthConfig.refreshToken = newConfig.refreshToken or oauthConfig.refreshToken
-  -- Save to INI file
-  Spotify.saveConfigFile()
+-- Clear album art cache
+function Spotify.clearAlbumArtCache()
+  if io.exists(IMAGE_CACHE_DIR) then
+    local files = io.scanDir(IMAGE_CACHE_DIR)
+    for _, file in ipairs(files) do
+      if file:match('%.png$') then
+        io.deleteFile(IMAGE_CACHE_DIR..'/'..file)
+      end
+    end
+    ui.toast(ui.Icons.Info, 'Album art cache cleared')
+  else
+    ui.toast(ui.Icons.Warning, 'Album art cache directory does not exist')
+  end
+end
+
+--[[ 
+  API Request Functions - these are the low-level functions that make the actual HTTP requests to Spotify's API. 
+  They are called by the higher-level functions above, which handle token management and response parsing.
+]]
+ 
+-- /api/token - refresh access token using refresh token
+function Spotify._RefreshToken(callback)
+  local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
+
+  local refresh_headers = {}
+  refresh_headers['Authorization'] = 'Basic '..auth
+  refresh_headers['Content-Type'] = 'application/x-www-form-urlencoded'
+  local refresh_body = 'grant_type=refresh_token&refresh_token='..oauthConfig.refreshToken
+
+  web.post(
+    SPOTIFY_TOKEN_URL,
+    refresh_headers,
+    refresh_body,
+    function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
+
+-- /api/token - exchange auth code for access token
+function Spotify._ExchangeAuthCode(authCode, callback)
+
+  local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
+  
+  local exchange_headers = {}
+  exchange_headers['Authorization'] = 'Basic '..auth
+  exchange_headers['Content-Type'] = 'application/x-www-form-urlencoded'
+  local exchange_body = 'grant_type=authorization_code&code='..authCode..'&redirect_uri='..urlEncode(REDIRECT_URI)
+
+  web.post(
+    SPOTIFY_TOKEN_URL,
+    exchange_headers,
+    exchange_body,
+    function(err, response)
+      if callback then callback(err, response) end
+    end)
+
+end
+
+-- /me/player/currently-playing - get current track info and playback state
+function Spotify._GetCurrentlyPlaying(callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+
+  web.request('GET',
+    SPOTIFY_API_URL..'/me/player/currently-playing',
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
+
+-- /me/player/volume?volume_percent={volume} - set volume (0-100)
+function Spotify._SetVolume(volume, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  auth_headers['Content-Type'] = 'application/json'
+  web.request('PUT',
+      SPOTIFY_API_URL..'/me/player/volume?volume_percent='..math.floor(volume),
+      auth_headers, '', function(err, response)
+        if callback then callback(err, response) end
+      end
+    )
+end
+
+-- /me/player/play, /pause, /next, /previous - various player actions
+function Spotify._PlayerCommand(action, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  local endpoint = SPOTIFY_API_URL..'/me/player/'..action
+  local method = (action == 'pause' or action == 'play') and 'PUT' or 'POST'
+  web.request(method,
+    endpoint,
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
+
+-- /me/player/devices returns list of user devices with volume info, find active device and return volume
+function Spotify._GetVolume(callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+
+  web.request('GET',
+      SPOTIFY_API_URL..'/me/player/devices',
+      auth_headers, '', function(err, response)
+        if callback then callback(err, response) end 
+      end
+    )
+
 end
 
 -- Initialize - ensure cache directory exists

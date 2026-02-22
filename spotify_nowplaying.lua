@@ -10,11 +10,8 @@ local volumeChanged = false
 local authUrl = nil
 local authUrlGenerated = false
 
--- Load config from INI file on startup
-spotify.getOauthConfig().authServerRunning = false
-
 function script.windowMain(dt)
-  local state = spotify.getPlaybackState()
+  local state = spotify.playbackState
   local config = spotify.getOauthConfig()
 
   -- DEBUG
@@ -123,21 +120,21 @@ function script.windowMain(dt)
         if spotify.appSettings.showControls or ac.windowFading() ~= 1 then
           ui.pushFont(ui.Font.Main)
           if ui.iconButton('controls/prev.png', vec2(24, 24)) then
-            spotify.playerCommand("previous")
+            spotify.prevTrack()
           end
           ui.sameLine()
           if state.isPlaying then
             if ui.iconButton('controls/pause.png', vec2(24, 24)) then
-              spotify.playerCommand("pause")
+              spotify.pause()
             end
           else
             if ui.iconButton('controls/play.png', vec2(24, 24)) then
-              spotify.playerCommand("play")
+              spotify.play()
             end
           end
           ui.sameLine()
           if ui.iconButton('controls/next.png', vec2(24, 24)) then
-            spotify.playerCommand("next")
+            spotify.nextTrack()
           end
           ui.popFont()
 
@@ -181,11 +178,13 @@ end
 
 function script.windowSettings(dt)
   local config = spotify.getOauthConfig()
-  --ac.debug('_clientId: ', config.clientId)
-  --ac.debug('_clientSecret: ', config.clientSecret)
-  --ac.debug('_refreshToken: ', config.refreshToken)
-  --ac.debug('_accessToken: ', config.accessToken)
-  --ac.debug('_tokenExpiry: ', config.tokenExpiry)
+  ac.debug('__clientId: ', config.clientId)
+  ac.debug('__clientSecret: ', config.clientSecret)
+  ac.debug('__refreshToken: ', config.refreshToken)
+  ac.debug('__accessToken: ', config.accessToken)
+  ac.debug('___tokenExpiry: ', config.tokenExpiry)
+  ac.debug('___currentTime', os.time())
+  ac.debug('___diff', config.tokenExpiry - os.time())
   
   ui.text('Spotify API')
   ui.separator()
@@ -202,7 +201,7 @@ function script.windowSettings(dt)
       if config.refreshToken == '' and ui.button('1. Generate Auth URL', vec2(ui.availableSpaceX(), 0)) then
         authUrlGenerated = false
 
-        if not config.authServerRunning then
+        if not spotify.authServerRunning then
           spotify.runAuthServer()
         end
 
@@ -227,11 +226,11 @@ function script.windowSettings(dt)
         ui.textWrapped('Click the button above and authorize the app')      
       end
 
-      if config.authServerRunning then
+      if spotify.authServerRunning then
         authUrlGenerated = false
       end
 
-      if not config.authServerRunning and authUrlGenerated then
+      if not spotify.authServerRunning and authUrlGenerated then
         ui.setNextItemWidth(ui.availableSpaceX() * 0.7)
         spotifyAuthCodeInput = ui.inputText('##authCode', spotifyAuthCodeInput)
         ui.sameLine()
@@ -270,20 +269,13 @@ function script.windowSettings(dt)
     if ui.button('Clear Authentication', vec2(ui.availableSpaceX(), 0)) then
       config.refreshToken = ''
       config.accessToken = ''
-      spotify.setConfig(config)
       ui.toast(ui.Icons.Info, 'Authentication cleared')
     end
     
     if ui.button('Refresh Access Token', vec2(ui.availableSpaceX(), 0)) then
       ui.toast(ui.Icons.Info, 'Refreshing access token...')
       spotify.retries = 0
-      spotify.refreshAccessToken(function(err, msg)
-        if err then
-          ui.toast(ui.Icons.Warning, 'Refresh failed: '..msg)
-        else
-          ui.toast(ui.Icons.Check, 'Token refreshed successfully')
-        end
-      end)
+      spotify.refreshAccessToken()
     end
   else
     ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 1, 0, 1))
@@ -291,7 +283,7 @@ function script.windowSettings(dt)
     ui.popStyleColor()
     
     ui.separator()
-    if config.authServerRunning then
+    if spotify.authServerRunning then
       ui.pushStyleColor(ui.StyleColor.Text, rgbm(0, 1, 0, 1))
       ui.textWrapped('Auth server is running. Please complete the authentication steps above.')
       ui.popStyleColor()
@@ -304,18 +296,7 @@ function script.windowSettings(dt)
   ui.separator()
 
   if ui.button('Clear Album Art Cache', vec2(ui.availableSpaceX(), 0)) then
-    local cacheDir = spotify.getImageCacheDir()
-    if io.exists(cacheDir) then
-      local files = io.scanDir(cacheDir)
-      for _, file in ipairs(files) do
-        if file:match('%.png$') then
-          io.deleteFile(cacheDir..'/'..file)
-        end
-      end
-      ui.toast(ui.Icons.Info, 'Album art cache cleared')
-    else
-      ui.toast(ui.Icons.Warning, 'Album art cache directory does not exist')
-    end
+    spotify.clearAlbumArtCache()
   end
 
   ac.debug('_showLink: ', spotify.appSettings.showLink)
@@ -329,7 +310,7 @@ function script.windowSettings(dt)
     spotify.appSettings.showControls = not spotify.appSettings.showControls
   end
 
-  if ui.checkbox('Enable Album Art Caching (Recommended)', spotify.appSettings.enableCache) then
+  if ui.checkbox('Enable Album Art Caching', spotify.appSettings.enableCache) then
     spotify.appSettings.enableCache = not spotify.appSettings.enableCache
   end
 
