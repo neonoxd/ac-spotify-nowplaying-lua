@@ -264,6 +264,7 @@ function script.windowSettings(dt)
   if config.refreshToken ~= '' then
     ui.pushStyleColor(ui.StyleColor.Text, rgbm(0, 1, 0, 1))
     ui.text('Status: Authenticated ✅')
+    ui.text('Refreshing Token in '..math.floor((config.tokenExpiry - os.time()) / 60)..' minutes')
     ui.popStyleColor()
     
     if ui.button('Clear Authentication', vec2(ui.availableSpaceX(), 0)) then
