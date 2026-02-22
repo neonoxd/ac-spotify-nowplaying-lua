@@ -30,6 +30,12 @@ local oauthConfig = ac.storage{
   authServerRunning = false,
 }
 
+Spotify.appSettings = ac.storage{
+  showControls = false,
+  showLink = false,
+  enableCache = true,
+}
+
 -- Playback state
 local playbackState = {
   trackName = 'Not initialized',
@@ -46,6 +52,10 @@ local playbackState = {
   trackUrl = '',
   volume = 0,
 }
+
+function Spotify.getImageCacheDir()
+  return IMAGE_CACHE_DIR
+end
 
 -- Load config from INI file to ac.storage
 function Spotify.loadConfigFile()
@@ -590,9 +600,13 @@ function Spotify.getCurrentTrack(callback)
               local imageUrl = json.item.album.images[1].url
               playbackState.albumArtUrl = imageUrl
               
-              -- Generate hash for filename
-              local albumHash = hashString(imageUrl)
-              playbackState.albumArtPath = downloadAlbumArt(imageUrl, albumHash)
+              if Spotify.appSettings.enableCache then
+                -- Generate hash for filename
+                local albumHash = hashString(imageUrl)
+                playbackState.albumArtPath = downloadAlbumArt(imageUrl, albumHash)
+              else
+                playbackState.albumArtPath = ''
+              end
             end
           end
         end

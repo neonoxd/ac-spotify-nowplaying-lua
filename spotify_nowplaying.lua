@@ -2,8 +2,6 @@ local spotify = require('spotify')
 local REFRESH_INTERVAL = 5 -- seconds between API calls
 local VOLUME_UPDATE_INTERVAL = 1 -- seconds between checking if we should update volume
 
-local settings_showSpotifyLink = false
-local settings_showControls = false
 local spotifyRefreshTimer = REFRESH_INTERVAL + 1
 local spotifyVolumeTimer = 0
 local spotifyAuthCodeInput = ''
@@ -33,8 +31,10 @@ function script.windowMain(dt)
   if config.refreshToken == '' or config.accessToken == '' then
     ui.beginOutline()
     ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 1, 0, 1))
+    ui.pushFont(ui.Font.Title)
     ui.textWrapped('Please authenticate with Spotify in the settings tab (Top Right of the window) to display now playing information.')
     ui.popStyleColor()
+    ui.popFont()
     ui.endOutline(rgbm(0, 0, 0, ac.windowFading()), 1)
     return
   end
@@ -74,12 +74,16 @@ function script.windowMain(dt)
     ui.beginGroup()
     -- Display album art if available
       if state.albumArtPath and state.albumArtPath ~= '' and io.exists(state.albumArtPath) then
-        --ui.offsetCursorY(10)
-        local availableHeight = ui.availableSpaceY()
-        local imageSize = math.min(200, availableHeight - 20)
+        local imageSize = math.min(200, ui.availableSpaceY() - 10)
         ui.image(state.albumArtPath, vec2(imageSize, imageSize))
-        --ui.drawImage(state.albumArtPath, ui.getCursor(), ui.getCursor() + vec2(imageSize, imageSize))
-        --ui.offsetCursorY(imageSize + 5)
+        ui.sameLine()
+      elseif state.albumArtUrl and state.albumArtUrl ~= '' then
+        local imageSize = math.min(200, ui.availableSpaceY() - 10)
+        ui.image(state.albumArtUrl, vec2(imageSize, imageSize))
+        ui.sameLine()
+      else
+        local imageSize = math.min(64, ui.availableSpaceY() - 20)
+        ui.image("icon.png", vec2(imageSize, imageSize))
         ui.sameLine()
       end
 
@@ -116,7 +120,7 @@ function script.windowMain(dt)
         end
 
         -- Controls
-        if settings_showControls or ac.windowFading() ~= 1 then
+        if spotify.appSettings.showControls or ac.windowFading() ~= 1 then
           ui.pushFont(ui.Font.Main)
           if ui.iconButton('controls/prev.png', vec2(24, 24)) then
             spotify.playerCommand("previous")
@@ -144,29 +148,33 @@ function script.windowMain(dt)
             volumeChanged = true
           end
 
-
         end
 
       ui.endGroup()
     ui.endGroup()
 
     -- Spotify track URL
-    if settings_showSpotifyLink and state.trackUrl ~= '' then
+    if spotify.appSettings.showLink and state.trackUrl ~= '' then
       ui.copyable(state.trackUrl)
     end
 
   else
-    ui.text(state.trackName)
-    if state.isPlaying == false then
-      ui.textWrapped('Status: Not playing')
-    end
+    -- No track playing, show placeholder
+    ui.beginGroup()
+      local availableHeight = ui.availableSpaceY()
+      local imageSize = math.min(64, availableHeight - 20)
+      ui.image("icon.png", vec2(imageSize, imageSize))
+      ui.sameLine()
+      ui.beginGroup()
+        ui.pushFont(ui.Font.Title)
+        ui.offsetCursorY(15)
+        ui.offsetCursorX(10)
+        ui.textWrapped(state.trackName)
+        ui.popFont()
+        ui.offsetCursorY(5)
+      ui.endGroup()
+    ui.endGroup()
   end
-  
-  --ui.separator()
-  
-  --if ui.button('Refresh Now', vec2(ui.availableSpaceX(), 0)) then
-  --  spotify.getCurrentTrack()
-  --end
   
   ui.endOutline(rgbm(0, 0, 0, ac.windowFading()), 1)
 end
@@ -179,79 +187,80 @@ function script.windowSettings(dt)
   --ac.debug('_accessToken: ', config.accessToken)
   --ac.debug('_tokenExpiry: ', config.tokenExpiry)
   
-  ui.text('Spotify API Configuration')
+  ui.text('Spotify API')
   ui.separator()
-  
-  ui.text('Setup Instructions')
-  ui.textWrapped('1. Edit settings.ini and enter your Client ID and Client Secret from https://developer.spotify.com/dashboard')
-  ui.textWrapped('2. Click "Generate Auth URL" visit the URL in your browser')
-  ui.textWrapped('3. Login and authorize the app')
-  ui.textWrapped('4.a If you are using the built-in auth server, you should be authenticated automatically now.')
-  ui.textWrapped('4.b Otherwise paste the code from the url and click "Exchange Code for Token"')
-  ui.separator()
-  
-  if config.clientId ~= '' and config.clientSecret ~= '' then
-    if config.refreshToken == '' and ui.button('1. Generate Auth URL', vec2(ui.availableSpaceX(), 0)) then
-      authUrlGenerated = false
+  if config.refreshToken == '' then
+    ui.text('Setup Instructions')
+    ui.textWrapped('1. Edit settings.ini and enter your Client ID and Client Secret from https://developer.spotify.com/dashboard')
+    ui.textWrapped('2. Click "Generate Auth URL" visit the URL in your browser')
+    ui.textWrapped('3. Login and authorize the app')
+    ui.textWrapped('4.a If you are using the built-in auth server, you should be authenticated automatically now.')
+    ui.textWrapped('4.b Otherwise paste the code from the url and click "Exchange Code for Token"')
+    ui.separator()
+    
+    if config.clientId ~= '' and config.clientSecret ~= '' then
+      if config.refreshToken == '' and ui.button('1. Generate Auth URL', vec2(ui.availableSpaceX(), 0)) then
+        authUrlGenerated = false
 
-      if not config.authServerRunning then
-        spotify.runAuthServer()
-      end
+        if not config.authServerRunning then
+          spotify.runAuthServer()
+        end
 
-      authUrl = nil
-      authUrl = spotify.generateAuthUrl()
-      authUrlGenerated = true
-      if authUrl then
-        ac.log('---Spotify Auth URL---')
-        ac.log(authUrl)
-        ac.log('---Spotify Auth URL---')
-        ac.console('Copy this URL and visit it in your browser to authorize:')
-        ac.console(authUrl)
-        ui.toast(ui.Icons.Info, 'Auth URL printed to console')
-      end
-    end
-
-    if authUrl then
-      if ui.button('Open Auth URL in Browser', vec2(ui.availableSpaceX(), 0)) then
-        os.execute(string.format('start "" "%s"', authUrl))
         authUrl = nil
-      end
-      ui.textWrapped('Click the button above and authorize the app')      
-    end
-
-    if config.authServerRunning then
-      authUrlGenerated = false
-    end
-
-    if not config.authServerRunning and authUrlGenerated then
-      ui.setNextItemWidth(ui.availableSpaceX() * 0.7)
-      spotifyAuthCodeInput = ui.inputText('##authCode', spotifyAuthCodeInput)
-      ui.sameLine()
-      ui.text('Auth Code')
-      if ui.button('2. Exchange Code for Token', vec2(ui.availableSpaceX(), 0)) then
-        if spotifyAuthCodeInput ~= '' then
-          spotify.exchangeAuthCode(spotifyAuthCodeInput, function(err, msg)
-            if err then
-              ui.toast(ui.Icons.Warning, 'Auth failed: '..msg)
-            else
-              ui.toast(ui.Icons.Check, msg)
-              spotifyAuthCodeInput = ''
-              authUrlGenerated = false
-            end
-          end)
-        else
-          ui.toast(ui.Icons.Warning, 'Please enter an authorization code')
+        authUrl = spotify.generateAuthUrl()
+        authUrlGenerated = true
+        if authUrl then
+          ac.log('---Spotify Auth URL---')
+          ac.log(authUrl)
+          ac.log('---Spotify Auth URL---')
+          ac.console('Copy this URL and visit it in your browser to authorize:')
+          ac.console(authUrl)
+          ui.toast(ui.Icons.Info, 'Auth URL printed to console')
         end
       end
+
+      if authUrl then
+        if ui.button('Open Auth URL in Browser', vec2(ui.availableSpaceX(), 0)) then
+          os.execute(string.format('start "" "%s"', authUrl))
+          authUrl = nil
+        end
+        ui.textWrapped('Click the button above and authorize the app')      
+      end
+
+      if config.authServerRunning then
+        authUrlGenerated = false
+      end
+
+      if not config.authServerRunning and authUrlGenerated then
+        ui.setNextItemWidth(ui.availableSpaceX() * 0.7)
+        spotifyAuthCodeInput = ui.inputText('##authCode', spotifyAuthCodeInput)
+        ui.sameLine()
+        ui.text('Auth Code')
+        if ui.button('2. Exchange Code for Token', vec2(ui.availableSpaceX(), 0)) then
+          if spotifyAuthCodeInput ~= '' then
+            spotify.exchangeAuthCode(spotifyAuthCodeInput, function(err, msg)
+              if err then
+                ui.toast(ui.Icons.Warning, 'Auth failed: '..msg)
+              else
+                ui.toast(ui.Icons.Check, msg)
+                spotifyAuthCodeInput = ''
+                authUrlGenerated = false
+              end
+            end)
+          else
+            ui.toast(ui.Icons.Warning, 'Please enter an authorization code')
+          end
+        end
+      end
+      
+    else
+      ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 1, 0, 1))
+      ui.textWrapped('Please configure your Client ID and Client Secret in settings.ini first')
+      ui.popStyleColor()
     end
     
-  else
-    ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 1, 0, 1))
-    ui.textWrapped('Please configure your Client ID and Client Secret in settings.ini first')
-    ui.popStyleColor()
+    ui.separator()
   end
-  
-  ui.separator()
   
   if config.refreshToken ~= '' then
     ui.pushStyleColor(ui.StyleColor.Text, rgbm(0, 1, 0, 1))
@@ -290,14 +299,38 @@ function script.windowSettings(dt)
       ui.textWrapped('Auth server is not running. Click "Generate Auth URL" to start it and follow the steps above.')
     end
   end
+
+  ui.text('Settings')
   ui.separator()
 
-  if ui.checkbox('Show Spotify Link', settings_showSpotifyLink) then
-    settings_showSpotifyLink = not settings_showSpotifyLink
+  if ui.button('Clear Album Art Cache', vec2(ui.availableSpaceX(), 0)) then
+    local cacheDir = spotify.getImageCacheDir()
+    if io.exists(cacheDir) then
+      local files = io.scanDir(cacheDir)
+      for _, file in ipairs(files) do
+        if file:match('%.png$') then
+          io.deleteFile(cacheDir..'/'..file)
+        end
+      end
+      ui.toast(ui.Icons.Info, 'Album art cache cleared')
+    else
+      ui.toast(ui.Icons.Warning, 'Album art cache directory does not exist')
+    end
   end
 
-  if ui.checkbox('Always Show Track Controls', settings_showControls) then
-    settings_showControls = not settings_showControls
+  ac.debug('_showLink: ', spotify.appSettings.showLink)
+  ac.debug('_showControls: ', spotify.appSettings.showControls)
+
+  if ui.checkbox('Show Spotify Link', spotify.appSettings.showLink) then
+    spotify.appSettings.showLink = not spotify.appSettings.showLink
+  end
+
+  if ui.checkbox('Always Show Track Controls', spotify.appSettings.showControls) then
+    spotify.appSettings.showControls = not spotify.appSettings.showControls
+  end
+
+  if ui.checkbox('Enable Album Art Caching (Recommended)', spotify.appSettings.enableCache) then
+    spotify.appSettings.enableCache = not spotify.appSettings.enableCache
   end
 
 end
