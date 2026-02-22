@@ -22,6 +22,7 @@ https://github.com/user-attachments/assets/ced3df6f-4d0b-4505-b74e-303ea7de077d
 1. **Get Spotify API Credentials**
    - Visit https://developer.spotify.com/dashboard
    - Create a new app
+   - When asked "Which API/SDKs are you planning to use?" Make sure to check **Web API**
    - Copy your Client ID and Client Secret
    - Add `http://127.0.0.1:9876/callback` redirect URI under Basic Information
 
