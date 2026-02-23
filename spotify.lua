@@ -50,6 +50,7 @@ Spotify.playbackState = {
   lastUpdate = 0,
   trackUrl = '',
   volume = 0,
+  queue = {},
 }
 
 -- Load config from INI file to ac.storage
@@ -395,6 +396,10 @@ function Spotify.getVolume(callback)
         return
       end
 
+      if response["status"] ~= 200 then
+        return
+      end
+
       local responseBody = response["body"]
       local json = JSON.parse(responseBody)
       local devices = json.devices or {}
@@ -501,7 +506,7 @@ function Spotify.getCurrentTrack(callback)
           ac.log('Spotify: Fetch error: '..tostring(err))
           return
         end
-
+        
         local responseBody = response["body"]
         local json = JSON.parse(responseBody)
         if response["status"] == 401 and json and json.error and json.error.message == 'The access token expired' then
@@ -519,6 +524,13 @@ function Spotify.getCurrentTrack(callback)
           return
         end
 
+        if response["status"] == 403 then
+          Spotify.playbackState.error = 'Forbidden: '..response["body"]
+          ac.log('Spotify: Forbidden response: ', response)
+          if callback then callback(true, 'Forbidden') end
+          return
+        end
+
         -- Handle empty response / (no track playing)
         if not responseBody or responseBody == '' then
           Spotify.playbackState.trackName = 'Nothing playing'
@@ -528,8 +540,6 @@ function Spotify.getCurrentTrack(callback)
           if callback then callback(false, '') end
           return
         end
-        -- Parse
-        local json = JSON.parse(responseBody)
 
         -- Extract data from parsed JSON
         Spotify.playbackState.isPlaying = json.is_playing or false
@@ -704,6 +714,44 @@ function Spotify._GetVolume(callback)
       end
     )
 
+end
+
+-- /me/player/queue - get current queue
+function Spotify._GetQueue(callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+
+  web.request('GET',
+    SPOTIFY_API_URL..'/me/player/queue',
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+      ac.log('Spotify: Queue response: ', response)
+
+      if response.status == 200 then
+        local responseBody = response["body"]
+        local json = JSON.parse(responseBody)
+        local queueItems = json.queue or {}
+        ac.log('Spotify: Current Queue:')
+        local parsedQueueItems = {}
+        for i, item in ipairs(queueItems) do
+          local trackName = item.name or 'Unknown Track'
+          local artistName = (item.artists and #item.artists > 0 and item.artists[1].name) or 'Unknown Artist'
+          local albumArtUrl = (item.album and item.album.images and #item.album.images > 0 and item.album.images[2].url) or ''
+          local queueItem = {
+            trackName = trackName,
+            artistName = artistName,
+            albumArtUrl = albumArtUrl
+          }
+          table.insert(parsedQueueItems, queueItem)
+          ac.log(i..'. '..trackName..' - '..artistName..' (Album Art: '..albumArtUrl..')')
+        end
+        Spotify.playbackState.queue = parsedQueueItems
+      else
+        ac.log('Spotify: Failed to fetch queue. Status: '..response.status)
+      end
+
+    end
+  )
 end
 
 -- Initialize - ensure cache directory exists

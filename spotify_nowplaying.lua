@@ -316,3 +316,28 @@ function script.windowSettings(dt)
   end
 
 end
+
+function script.windowQueue(dt)
+  ui.text('Queue')
+  ui.separator()
+  if ui.button('Refresh Queue', vec2(ui.availableSpaceX(), 0)) then
+    spotify._GetQueue()
+  end
+
+  ui.beginGroup()
+  if spotify.playbackState.queue and #spotify.playbackState.queue > 0 then
+    for i, item in ipairs(spotify.playbackState.queue) do
+      ui.image(item.albumArtUrl or 'icon.png', vec2(32, 32))
+      ui.sameLine()
+      --ui.text(string.format('%d. %s - %s', i, item.trackName, item.artistName))
+      ui.beginGroup()
+        ui.text(item.trackName)
+        ui.text(item.artistName)
+      ui.endGroup()
+      ui.separator()
+    end
+  else
+    ui.text('Queue is empty or not available.')
+  end
+  ui.endGroup()
+end
