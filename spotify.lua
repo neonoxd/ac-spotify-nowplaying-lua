@@ -36,6 +36,10 @@ Spotify.appSettings = ac.storage{
   enableCache = true,
 }
 
+-- Song history stack for quick-loading previous track metadata
+Spotify.songHistory = {}
+Spotify.maxHistorySize = 20
+
 -- Playback state
 Spotify.playbackState = {
   trackName = 'Nothing playing',
@@ -175,6 +179,25 @@ local function urlEncode(str)
   return str:gsub('([^%w%-_.~])', function(c)
     return string.format('%%%02X', string.byte(c))
   end)
+end
+
+-- Parse Song Metadata
+local function parseTrackMetadata(json)
+  local song = {}
+  song.trackName = json.item.name or 'Unknown Track'
+  song.duration = json.item.duration_ms or 0
+  song.artistName = (json.item.artists and #json.item.artists > 0 and json.item.artists[1].name) or 'Unknown Artist'
+  song.trackUrl = (json.item.external_urls and json.item.external_urls.spotify) or ''
+
+  if json.item.album then
+    song.albumArtUrl = (json.item.album.images and #json.item.album.images > 0 and json.item.album.images[1].url) or ''
+    song.albumName = json.item.album.name or ''
+  else
+    song.albumArtUrl = ''
+    song.albumName = ''
+  end
+
+  return song
 end
 
 -- Generate auth URL for user to visit
@@ -454,17 +477,82 @@ function Spotify.playerCommand(action, callback)
       if callback then callback(false, action) end
     end)
 
-  end)
+  end) 
+end
+
+-- Save current song metadata to history stack
+local function pushCurrentSongToHistory()
+  local state = Spotify.playbackState
+  -- Only push if there's an actual track playing
+  if state.trackName and state.trackName ~= 'Nothing playing' and state.trackName ~= '' then
+    local snapshot = {
+      trackName = state.trackName,
+      artistName = state.artistName,
+      albumName = state.albumName,
+      albumArtUrl = state.albumArtUrl,
+      albumArtPath = state.albumArtPath,
+      duration = state.duration,
+      trackUrl = state.trackUrl,
+    }
+    table.insert(Spotify.songHistory, snapshot)
+    -- Trim history if it exceeds max size
+    if #Spotify.songHistory > Spotify.maxHistorySize then
+      table.remove(Spotify.songHistory, 1)
+    end
+    ac.log('Spotify: Pushed to history: '..snapshot.trackName..' (history size: '..#Spotify.songHistory..')')
+  end
 end
 
 -- Skip Track
 function Spotify.nextTrack()
-  Spotify.playerCommand('next')
+  pushCurrentSongToHistory()
+  Spotify.playerCommand('next', function() 
+    Spotify._GetQueue(function(err, response) 
+      local json = JSON.parse(response["body"])
+      local queueItems = json.queue or {}
+      for i, item in ipairs(queueItems) do
+        if (i == 1) then 
+          local js = {}
+          js.item = item
+          local song = parseTrackMetadata(js)
+
+          Spotify.playbackState.progress = 0
+          -- Track
+          Spotify.playbackState.trackName = song.trackName
+          Spotify.playbackState.duration = song.duration
+          Spotify.playbackState.artistName = song.artistName
+          Spotify.playbackState.trackUrl = song.trackUrl
+          -- Album
+          Spotify.playbackState.albumName = song.albumName
+          Spotify.playbackState.albumArtUrl = song.albumArtUrl
+        end
+      end
+    end)
+  end)
 end
 
 -- Previous Track
 function Spotify.prevTrack()
-  Spotify.playerCommand('previous')
+  Spotify.playerCommand('previous', function()
+    -- Quick-load previous song metadata from history if available
+    local historySize = #Spotify.songHistory
+    if historySize > 0 then
+      local prev = Spotify.songHistory[historySize]
+      table.remove(Spotify.songHistory, historySize)
+
+      Spotify.playbackState.progress = 0
+      Spotify.playbackState.trackName = prev.trackName
+      Spotify.playbackState.duration = prev.duration
+      Spotify.playbackState.artistName = prev.artistName
+      Spotify.playbackState.trackUrl = prev.trackUrl
+      Spotify.playbackState.albumName = prev.albumName
+      Spotify.playbackState.albumArtUrl = prev.albumArtUrl
+      Spotify.playbackState.albumArtPath = prev.albumArtPath
+      Spotify.playbackState.isPlaying = true
+
+      ac.log('Spotify: Quick-loaded previous track from history: '..prev.trackName)
+    end
+  end)
 end
 
 -- Play
@@ -526,6 +614,7 @@ function Spotify.getCurrentTrack(callback)
 
         if response["status"] == 403 then
           Spotify.playbackState.error = 'Forbidden: '..response["body"]
+          Spotify.retries = MAX_RETRIES
           ac.log('Spotify: Forbidden response: ', response)
           if callback then callback(true, 'Forbidden') end
           return
@@ -544,41 +633,27 @@ function Spotify.getCurrentTrack(callback)
         -- Extract data from parsed JSON
         Spotify.playbackState.isPlaying = json.is_playing or false
         Spotify.playbackState.progress = json.progress_ms or 0
-        
-        if json.item then
-          Spotify.playbackState.trackName = json.item.name or 'Unknown Track'
-          Spotify.playbackState.duration = json.item.duration_ms or 0
-          
-          if json.item.artists and #json.item.artists > 0 then
-            Spotify.playbackState.artistName = json.item.artists[1].name or 'Unknown Artist'
-          end
 
-          if json.item.external_urls and json.item.external_urls.spotify then
-            Spotify.playbackState.trackUrl = json.item.external_urls.spotify
-          else
-            Spotify.playbackState.trackUrl = ''
-          end
-          
-          if json.item.album then
-            Spotify.playbackState.albumName = json.item.album.name or ''
-            
-            if json.item.album.images and #json.item.album.images > 0 then
-              local imageUrl = json.item.album.images[1].url
-              Spotify.playbackState.albumArtUrl = imageUrl
-              
-              if Spotify.appSettings.enableCache then
-                -- Generate hash for filename
-                local albumHash = hashString(imageUrl)
-                Spotify.playbackState.albumArtPath = downloadAlbumArt(imageUrl, albumHash)
-              else
-                Spotify.playbackState.albumArtPath = ''
-              end
-            end
-          end
+        local song = parseTrackMetadata(json)
+        -- Track
+        Spotify.playbackState.trackName = song.trackName
+        Spotify.playbackState.duration = song.duration
+        Spotify.playbackState.artistName = song.artistName
+        Spotify.playbackState.trackUrl = song.trackUrl
+        -- Album
+        Spotify.playbackState.albumName = song.albumName
+        Spotify.playbackState.albumArtUrl = song.albumArtUrl
+
+        if Spotify.appSettings.enableCache then
+          local albumHash = hashString(song.albumArtUrl)
+          Spotify.playbackState.albumArtPath = downloadAlbumArt(song.albumArtUrl, albumHash)
+        else
+          Spotify.playbackState.albumArtPath = ''
         end
         
         Spotify.playbackState.lastUpdate = os.time()
         Spotify.playbackState.error = ''
+
         if callback then callback(false, '') end
 
       end
@@ -618,11 +693,37 @@ function Spotify.clearAlbumArtCache()
   end
 end
 
+-- Get Queue
+function Spotify.GetQueue()
+  Spotify._GetQueue(function (err, response)
+      if response.status == 200 then
+        local responseBody = response["body"]
+        local json = JSON.parse(responseBody)
+        local queueItems = json.queue or {}
+        local parsedQueueItems = {}
+        for i, item in ipairs(queueItems) do
+          local trackName = item.name or 'Unknown Track'
+          local artistName = (item.artists and #item.artists > 0 and item.artists[1].name) or 'Unknown Artist'
+          local albumArtUrl = (item.album and item.album.images and #item.album.images > 0 and item.album.images[2].url) or ''
+          local queueItem = {
+            trackName = trackName,
+            artistName = artistName,
+            albumArtUrl = albumArtUrl
+          }
+          table.insert(parsedQueueItems, queueItem)
+        end
+        Spotify.playbackState.queue = parsedQueueItems
+      else
+        ac.log('Spotify: Failed to fetch queue. Status: '..response.status)
+      end
+  end)
+end
+
 --[[ 
   API Request Functions - these are the low-level functions that make the actual HTTP requests to Spotify's API. 
   They are called by the higher-level functions above, which handle token management and response parsing.
 ]]
- 
+
 -- /api/token - refresh access token using refresh token
 function Spotify._RefreshToken(callback)
   local auth = base64Encode(oauthConfig.clientId..':'..oauthConfig.clientSecret)
@@ -725,31 +826,6 @@ function Spotify._GetQueue(callback)
     SPOTIFY_API_URL..'/me/player/queue',
     auth_headers, '', function(err, response)
       if callback then callback(err, response) end
-      ac.log('Spotify: Queue response: ', response)
-
-      if response.status == 200 then
-        local responseBody = response["body"]
-        local json = JSON.parse(responseBody)
-        local queueItems = json.queue or {}
-        ac.log('Spotify: Current Queue:')
-        local parsedQueueItems = {}
-        for i, item in ipairs(queueItems) do
-          local trackName = item.name or 'Unknown Track'
-          local artistName = (item.artists and #item.artists > 0 and item.artists[1].name) or 'Unknown Artist'
-          local albumArtUrl = (item.album and item.album.images and #item.album.images > 0 and item.album.images[2].url) or ''
-          local queueItem = {
-            trackName = trackName,
-            artistName = artistName,
-            albumArtUrl = albumArtUrl
-          }
-          table.insert(parsedQueueItems, queueItem)
-          ac.log(i..'. '..trackName..' - '..artistName..' (Album Art: '..albumArtUrl..')')
-        end
-        Spotify.playbackState.queue = parsedQueueItems
-      else
-        ac.log('Spotify: Failed to fetch queue. Status: '..response.status)
-      end
-
     end
   )
 end

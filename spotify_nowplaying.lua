@@ -321,7 +321,7 @@ function script.windowQueue(dt)
   ui.text('Queue')
   ui.separator()
   if ui.button('Refresh Queue', vec2(ui.availableSpaceX(), 0)) then
-    spotify._GetQueue()
+    spotify.GetQueue()
   end
 
   ui.beginGroup()
