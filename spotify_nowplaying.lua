@@ -136,6 +136,15 @@ function script.windowMain(dt)
           if ui.iconButton('controls/next.png', vec2(24, 24)) then
             spotify.nextTrack()
           end
+          ui.sameLine()
+          local likeLabel = state.isLiked and '♥' or '♡'
+          if ui.button(likeLabel..'##Like', vec2(24, 24)) then
+            if state.isLiked then
+              spotify.unlikeTrack()
+            else
+              spotify.likeTrack()
+            end
+          end
           ui.popFont()
 
           -- Volume control

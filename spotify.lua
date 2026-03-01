@@ -13,7 +13,7 @@ local SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'
 local SPOTIFY_API_URL = 'https://api.spotify.com/v1'
 local AUTH_SERVER = 'http://127.0.0.1:9876'
 local REDIRECT_URI = AUTH_SERVER..'/callback'
-local SCOPE = 'user-read-currently-playing user-read-playback-state user-modify-playback-state'
+local SCOPE = 'user-read-currently-playing user-read-playback-state user-modify-playback-state user-library-read user-library-modify'
 local IMAGE_CACHE_DIR = scriptDir..'/spotify_art'
 local MAX_RETRIES = 5
 
@@ -53,6 +53,8 @@ Spotify.playbackState = {
   error = '',
   lastUpdate = 0,
   trackUrl = '',
+  trackId = '',
+  isLiked = false,
   volume = 0,
   queue = {},
 }
@@ -188,6 +190,7 @@ local function parseTrackMetadata(json)
   song.duration = json.item.duration_ms or 0
   song.artistName = (json.item.artists and #json.item.artists > 0 and json.item.artists[1].name) or 'Unknown Artist'
   song.trackUrl = (json.item.external_urls and json.item.external_urls.spotify) or ''
+  song.trackId = json.item.id or ''
 
   if json.item.album then
     song.albumArtUrl = (json.item.album.images and #json.item.album.images > 0 and json.item.album.images[1].url) or ''
@@ -372,7 +375,7 @@ function Spotify.refreshAccessToken(callback)
 
       if accessToken then
         ac.log("Token Refreshed")
-        ui.toast(ui.Icons.Info, 'Token refreshed successfully')
+        --ui.toast(ui.Icons.Info, 'Token refreshed successfully')
         oauthConfig.accessToken = accessToken
         oauthConfig.tokenExpiry = os.time() + expiresIn
         Spotify.saveConfigFile()
@@ -555,6 +558,88 @@ function Spotify.prevTrack()
   end)
 end
 
+-- Check if the current track is saved in the user's library
+function Spotify.checkIsLiked(trackId, callback)
+  if not trackId or trackId == '' then
+    if callback then callback(true, 'No track ID') end
+    return
+  end
+
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
+      return
+    end
+
+    Spotify._CheckLiked(trackId, function(err, response)
+      if err then
+        if callback then callback(true, tostring(err)) end
+        return
+      end
+
+      local json = JSON.parse(response["body"])
+      if json and type(json) == 'table' and json[1] ~= nil then
+        Spotify.playbackState.isLiked = json[1] == true
+      end
+      if callback then callback(false, Spotify.playbackState.isLiked) end
+    end)
+  end)
+end
+
+-- Save (like) the current track
+function Spotify.likeTrack(callback)
+  local trackId = Spotify.playbackState.trackId
+  if not trackId or trackId == '' then
+    if callback then callback(true, 'No track ID') end
+    return
+  end
+
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
+      return
+    end
+
+    Spotify._SaveTrack(trackId, function(err, response)
+      if err then
+        if callback then callback(true, tostring(err)) end
+        return
+      end
+
+      Spotify.playbackState.isLiked = true
+      ui.toast(ui.Icons.Heart, 'Added to Liked Songs')
+      if callback then callback(false, true) end
+    end)
+  end)
+end
+
+-- Remove (unlike) the current track
+function Spotify.unlikeTrack(callback)
+  local trackId = Spotify.playbackState.trackId
+  if not trackId or trackId == '' then
+    if callback then callback(true, 'No track ID') end
+    return
+  end
+
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      if callback then callback(has_error, ensure_token_err) end
+      return
+    end
+
+    Spotify._RemoveTrack(trackId, function(err, response)
+      if err then
+        if callback then callback(true, tostring(err)) end
+        return
+      end
+
+      Spotify.playbackState.isLiked = false
+      ui.toast(ui.Icons.Heart, 'Removed from Liked Songs')
+      if callback then callback(false, false) end
+    end)
+  end)
+end
+
 -- Play
 function Spotify.play()
   Spotify.playerCommand('play')
@@ -635,14 +720,22 @@ function Spotify.getCurrentTrack(callback)
         Spotify.playbackState.progress = json.progress_ms or 0
 
         local song = parseTrackMetadata(json)
+        local trackChanged = song.trackId ~= Spotify.playbackState.trackId
         -- Track
         Spotify.playbackState.trackName = song.trackName
         Spotify.playbackState.duration = song.duration
         Spotify.playbackState.artistName = song.artistName
         Spotify.playbackState.trackUrl = song.trackUrl
+        Spotify.playbackState.trackId = song.trackId
         -- Album
         Spotify.playbackState.albumName = song.albumName
         Spotify.playbackState.albumArtUrl = song.albumArtUrl
+
+        -- Check liked status when track changes
+        if trackChanged then
+          Spotify.playbackState.isLiked = false
+          Spotify.checkIsLiked(song.trackId)
+        end
 
         if Spotify.appSettings.enableCache then
           local albumHash = hashString(song.albumArtUrl)
@@ -815,6 +908,47 @@ function Spotify._GetVolume(callback)
       end
     )
 
+end
+
+-- /me/tracks/contains?ids={id} - check if track is in user's library
+function Spotify._CheckLiked(trackId, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+
+  web.request('GET',
+    SPOTIFY_API_URL..'/me/tracks/contains?ids='..trackId,
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
+
+-- /me/tracks?ids={id} - save track to user's library
+function Spotify._SaveTrack(trackId, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  auth_headers['Content-Type'] = 'application/json'
+
+  web.request('PUT',
+    SPOTIFY_API_URL..'/me/tracks?ids='..trackId,
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
+
+-- /me/tracks?ids={id} - remove track from user's library
+function Spotify._RemoveTrack(trackId, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  auth_headers['Content-Type'] = 'application/json'
+
+  web.request('DELETE',
+    SPOTIFY_API_URL..'/me/tracks?ids='..trackId,
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
 end
 
 -- /me/player/queue - get current queue
