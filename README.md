@@ -61,3 +61,8 @@ cd external
 - **Auth fails**: Check your Client ID and Client Secret in `settings.ini`
 - **Invalid Auth Code**: If you are doing manual authentication you need to enter the auth code quickly otherwise it expires
 - **No track info**: Make sure Spotify is playing and the API credentials are correct
+
+## Support
+You can report issues over on overtake.gg https://www.overtake.gg/downloads/spotify-now-playing-lua-app.82575/
+
+Or by opening Github [Issues](https://github.com/neonoxd/ac-spotify-nowplaying-lua/issues) 
