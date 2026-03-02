@@ -19,16 +19,30 @@ jobs:
       - name: Set variables
         id: vars
         run: |
-          TAG="release-$(date +'%Y%m%d-%H%M%S')"
-          NAME=$(basename "${{ github.repository }}")
+          VERSION=$(grep '^VERSION' manifest.ini | sed 's/VERSION\s*=\s*//' | tr -d '[:space:]')
+          TAG="v${VERSION}"
           FOLDER="spotify_nowplaying"
+          ZIP="${FOLDER}-${VERSION}.zip"
 
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "folder=$FOLDER" >> $GITHUB_OUTPUT
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+
+
+      - name: Check if version already released
+        id: check
+        run: |
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ steps.vars.outputs.tag }}$"; then
+            echo "Version ${{ steps.vars.outputs.version }} already released, skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
 
       - name: Copy files into release folder
+        if: steps.check.outputs.skip == 'false'
         run: |
           mkdir "${{ steps.vars.outputs.folder }}"
 
@@ -40,38 +54,16 @@ jobs:
             ./ "${{ steps.vars.outputs.folder }}/"
 
 
-      - name: Create source zip
+      - name: Create zip
+        if: steps.check.outputs.skip == 'false'
         run: |
-          zip -r \
-            "${{ steps.vars.outputs.folder }}-source.zip" \
-            "${{ steps.vars.outputs.folder }}"
-
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-
-
-      - name: Compile Windows binary
-        run: |
-          GOOS=windows GOARCH=amd64 go build \
-            -o "${{ steps.vars.outputs.folder }}/external/auth_server.exe" \
-            -ldflags="-s -w" \
-            "${{ steps.vars.outputs.folder }}/external/auth_server.go"
-
-
-      - name: Create windows zip
-        run: |
-          zip -r \
-            "${{ steps.vars.outputs.folder }}-windows.zip" \
-            "${{ steps.vars.outputs.folder }}"
+          zip -r "${{ steps.vars.outputs.zip }}" "${{ steps.vars.outputs.folder }}"
 
 
       - name: Create release
+        if: steps.check.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
-          name: ${{ steps.vars.outputs.name }} ${{ steps.vars.outputs.tag }}
-          files: |
-            ${{ steps.vars.outputs.folder }}-source.zip
-            ${{ steps.vars.outputs.folder }}-windows.zip
+          name: ${{ steps.vars.outputs.folder }} ${{ steps.vars.outputs.tag }}
+          files: ${{ steps.vars.outputs.zip }}

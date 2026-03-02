@@ -229,7 +229,7 @@ function script.windowSettings(dt)
 
       if authUrl then
         if ui.button('Open Auth URL in Browser', vec2(ui.availableSpaceX(), 0)) then
-          os.execute(string.format('start "" "%s"', authUrl))
+          os.openURL(authUrl, false)
           authUrl = nil
         end
         ui.textWrapped('Click the button above and authorize the app')      

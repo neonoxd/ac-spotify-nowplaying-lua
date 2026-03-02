@@ -1,6 +1,5 @@
--- Spotify Web API Integration for Assetto Corsa
--- Displays currently playing track with album art
-
+-- Spotify Backend
+local authserver = require('auth')
 local Spotify = {}
 
 -- Load INI configuration file from script directory
@@ -220,76 +219,26 @@ function Spotify.generateAuthUrl()
   return SPOTIFY_AUTH_URL..'?'..table.concat(params, '&')
 end
 
--- Handle auth callback from server and exchange code for token
-function Spotify.handleAuthCallback()
-  web.get(AUTH_SERVER..'/token', function(auth_err, auth_resp)
-    -- Handle errors from auth server
-    if auth_err then
-      ac.log('Spotify: Failed to get auth code from server: '..tostring(auth_err))
-      return
-    end
-    
-    local respBody = auth_resp.body
-    local json = JSON.parse(respBody)
-    local authCode = json.code
+-- Start the auth server to listen for Spotify's callback with the authorization code
+function Spotify.runAuthServer()
+  ac.log('Spotify: Trying to start auth server process on port '..Spotify.overrideAuthPort)
+  Spotify.authServerRunning = false
+
+  authserver.StartAuthServer(Spotify.overrideAuthPort, function(authCode)
     if authCode and authCode ~= '' then
-      ac.log('Spotify: Received auth code: '..authCode:sub(1, 5)..'...')
+      ac.log('Spotify: Received auth code from server: ' .. (authCode:sub(1, 5) .. '...'))
       Spotify.exchangeAuthCode(authCode, function(exchange_err, message)
         if exchange_err then
           ui.toast(ui.Icons.Error, 'Authentication failed: '..message)
         else
           ui.toast(ui.Icons.Success, 'Authentication successful')
           Spotify.getCurrentTrack()
-
-          -- Kill server
-          ac.log('Spotify: Sending exit command to auth server')
-          web.get(AUTH_SERVER..'/exit', function(err,response) end)
         end
       end)
     else
-    ac.log('Spotify: No auth code received in callback')
+      ac.log('Spotify: Auth server callback received no code')
     end
   end)
-end
-
--- Run built-in auth server process if compiled version is available
-function Spotify.runAuthServer()
-  ac.log('Spotify: Trying to start auth server process on port '..Spotify.overrideAuthPort)
-  Spotify.authServerRunning = false
-
-  local server_path = scriptDir..'/external/auth_server.exe'
-  if not io.exists(server_path) then 
-    ac.log('Spotify: Auth server executable not found at '..server_path)
-    return
-  end
-
-  os.runConsoleProcess(
-    {
-      filename = server_path,
-      arguments = { server_path, "-port", tostring(Spotify.overrideAuthPort) },
-      rawArguments = true,
-      terminateWithScript = true,
-      dataCallback = function (err, data)
-        if err then
-          ac.log('Spotify: Auth server error: ', tostring(err))
-          Spotify.authServerRunning = false
-        else
-          local datastr = tostring(data)
-          if datastr:match('Listening') then
-            Spotify.authServerRunning = true
-            ac.log('Spotify: Auth server is now running')
-          end
-
-          if datastr:match('Authorization code received') then
-            ac.log('Spotify: Authorization code received, fetching token...')
-            Spotify.handleAuthCallback()
-          end
-        end
-      end
-    }, function (err, data)
-        Spotify.authServerRunning = false
-    end
-  )
 end
 
 -- Exchange authorization code for refresh token
@@ -811,6 +760,12 @@ function Spotify.GetQueue()
       end
   end)
 end
+
+ac.onSharedEvent("AuthServer.Status", function(data)
+    if data and data.status == "listening" then
+        Spotify.authServerRunning = true
+    end
+end)
 
 --[[ 
   API Request Functions - these are the low-level functions that make the actual HTTP requests to Spotify's API. 

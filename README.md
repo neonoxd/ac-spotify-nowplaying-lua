@@ -36,28 +36,13 @@ https://github.com/user-attachments/assets/ced3df6f-4d0b-4505-b74e-303ea7de077d
    - Click "Generate Auth URL"
    - Click "Open Auth URL in Browser"
    - Log in and authorize your app
-   - If you have compiled or downloaded the auth server you should be authenticated automatically
-   - Otherwise you have to copy the auth code from the browser
+   - You should be authenticated automatically
+   - Otherwise you have to copy the auth code from the browser (the part after `&code=` in the URL)
         - Paste it into `Auth Code` field
         - Click `Exchange Code for Token` to authenticate
 
-
-## Building
-
-1. Install Go
-   - Download from https://golang.org/dl/
-   - Add to your system PATH
-
-2. Build the auth server:
-
-```bash
-cd external
-.\build_auth_server.bat
-```
-
 ## Troubleshooting
 
-- **"Go compiler not found"**: Install Go and add it to your PATH
 - **Auth fails**: Check your Client ID and Client Secret in `settings.ini`
 - **Invalid Auth Code**: If you are doing manual authentication you need to enter the auth code quickly otherwise it expires
 - **No track info**: Make sure Spotify is playing and the API credentials are correct
