@@ -90,7 +90,7 @@ while true do
             server:close()
             server = nil
         end
-        
+        ac.broadcastSharedEvent("AuthServer.Status", { status = "stopped", port = port })
         break
     end
 end

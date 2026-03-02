@@ -764,6 +764,8 @@ end
 ac.onSharedEvent("AuthServer.Status", function(data)
     if data and data.status == "listening" then
         Spotify.authServerRunning = true
+    else
+        Spotify.authServerRunning = false
     end
 end)
 
