@@ -10,6 +10,35 @@ local volumeChanged = false
 local authUrl = nil
 local authUrlGenerated = false
 
+--[[
+  Progress bar workaround for CSP 0.3.0-preview302
+]]
+local bgGray = rgbm(0.25, 0.22, 0.22, 1)
+local cursorPos = vec2(0, 0)
+local progressVect2 = vec2(0, 0)
+local progressSizeVect2 = vec2(0, 0)
+local titleLengthVect2 = vec2(0, 0)
+local titlePosVect2 = vec2(0, 0)
+local function drawProgressBar(value, size, color, title)
+  cursorPos:set(ui.getCursor())
+  ui.drawRectFilled(cursorPos, cursorPos + size, bgGray, 3)
+  local progress = 0
+  if value > 0 then
+    progress = size.x * value
+    progressVect2:set(progress, size.y)
+    cursorPos:add(progressVect2, progressSizeVect2)
+    ui.drawRectFilled(cursorPos, progressSizeVect2, color, 3)
+  end
+  local textLength = ui.measureText(title).x + 5
+  titleLengthVect2:set(math.max(progress - textLength, 0), 0)
+  cursorPos:add(titleLengthVect2, titlePosVect2)
+  ui.drawText(title, titlePosVect2)
+  ui.offsetCursorY(size.y + 10)
+end
+--[[
+  End progress bar workaround
+]]
+
 function script.windowMain(dt)
   local state = spotify.playbackState
   local config = spotify.getOauthConfig()
@@ -113,7 +142,8 @@ function script.windowMain(dt)
           local progressSec = math.floor((state.progress / 1000) % 60)
           ui.text(string.format('Progress: %d:%02d / %d:%02d', 
             progressMin, progressSec, durationMin, durationSec))
-          ui.progressBar(progressPercent / 100, vec2(ui.availableSpaceX(), 4))
+          --ui.progressBar(progressPercent / 100, vec2(ui.availableSpaceX(), 4))
+          drawProgressBar(progressPercent / 100, vec2(ui.availableSpaceX(), 5), rgbm(1,1,1, 1), "")
         end
 
         -- Controls

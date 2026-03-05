@@ -51,3 +51,7 @@ https://github.com/user-attachments/assets/ced3df6f-4d0b-4505-b74e-303ea7de077d
 You can report issues over on overtake.gg https://www.overtake.gg/downloads/spotify-now-playing-lua-app.82575/
 
 Or by opening Github [Issues](https://github.com/neonoxd/ac-spotify-nowplaying-lua/issues) 
+
+## Special thanks
+- Ligneel: Help with oauth/webserver simplification
+- DaZD: Progress bar workaround for CSP 0.3.0-preview302
