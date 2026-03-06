@@ -6,8 +6,7 @@ https://github.com/user-attachments/assets/fad691bc-b005-4a79-ae81-aca7c9de8487
 
 # Download
 
-[![Download](https://img.shields.io/badge/Download-Latest-blue)](https://github.com/neonoxd/ac-spotify-nowplaying-lua/releases/latest/download/spotify_nowplaying-windows.zip)
-[![Download](https://img.shields.io/badge/Download_Without_Auth_Server-Latest-green)](https://github.com/neonoxd/ac-spotify-nowplaying-lua/releases/latest/download/spotify_nowplaying-source.zip)
+[![Download](https://img.shields.io/badge/Download-Latest-blue)](https://github.com/neonoxd/ac-spotify-nowplaying-lua/releases/latest)
 
 ## Features
 
