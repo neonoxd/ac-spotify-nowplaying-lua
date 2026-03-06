@@ -1,8 +1,8 @@
 # Spotify Now Playing Lua App for Assetto Corsa CSP
 
-Display current Spotify track information in Assetto Corsa.
+Display current Spotify track information and control in Assetto Corsa.
 
-https://github.com/user-attachments/assets/ced3df6f-4d0b-4505-b74e-303ea7de077d
+https://github.com/user-attachments/assets/fad691bc-b005-4a79-ae81-aca7c9de8487
 
 # Download
 
@@ -11,10 +11,9 @@ https://github.com/user-attachments/assets/ced3df6f-4d0b-4505-b74e-303ea7de077d
 
 ## Features
 
-- **Track Display**: Shows current track name, artist, album, and progress
-- **Album Art**: Displays album artwork if available
+- **Track Display**: Shows current track information with album art
 - **Show Spotify Link**: Enable in settings to show copyable track URL to share
-- **Track Controls**: Allows changing tracks and volume
+- **Track Controls**: Change tracks, volume, seek, like/unlike songs
 - **Easy authentication**: Using refresh token you'll only have to authenticate once and it will automatically be refreshed
 
 ## Setup
