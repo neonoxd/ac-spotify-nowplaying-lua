@@ -13,7 +13,6 @@ local SPOTIFY_API_URL = 'https://api.spotify.com/v1'
 local AUTH_SERVER = 'http://127.0.0.1:9876'
 local REDIRECT_URI = AUTH_SERVER..'/callback'
 local SCOPE = 'user-read-currently-playing user-read-playback-state user-modify-playback-state user-library-read user-library-modify'
-local IMAGE_CACHE_DIR = scriptDir..'/spotify_art'
 local MAX_RETRIES = 5
 
 Spotify.retries = 0
@@ -32,7 +31,7 @@ local oauthConfig = ac.storage{
 Spotify.appSettings = ac.storage{
   showControls = false,
   showLink = false,
-  enableCache = true,
+  colorTheme = rgbm(1, 1, 1, 1)
 }
 
 -- Song history stack for quick-loading previous track metadata
@@ -45,7 +44,6 @@ Spotify.playbackState = {
   artistName = '',
   albumName = '',
   albumArtUrl = '',
-  albumArtPath = '',
   isPlaying = false,
   duration = 0,
   progress = 0,
@@ -111,21 +109,6 @@ function Spotify.saveConfigFile()
   ac.log('Spotify: Config saved to settings.ini')
 end
 
--- Create cache directory if it doesn't exist
-local function ensureCacheDir()
-  if not io.exists(IMAGE_CACHE_DIR) then
-    io.createDir(IMAGE_CACHE_DIR)
-  end
-end
-
-local function hashString(str)
-  local hash = 5381
-  for i = 1, #str do
-    hash = ((hash * 33) + str:byte(i)) % 0x7FFFFFFF
-  end
-  return string.format('%08x', hash)
-end
-
 -- Helper: Encode string to base64 (for Authorization header)
 local function base64Encode(str)
   local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
@@ -141,40 +124,6 @@ local function base64Encode(str)
   end)..({ '', '==', '=' })[#str % 3 + 1])
 end
 
--- Download and cache album art
-local function downloadAlbumArt(imageUrl, albumHash)
-  if not imageUrl or imageUrl == '' then
-    return nil
-  end
-  
-  ensureCacheDir()
-  
-  -- Generate cache filename from URL hash
-  local cacheFile = IMAGE_CACHE_DIR..'/'..albumHash..'.png'
-  
-  -- Check if already cached
-  if io.exists(cacheFile) then
-    return cacheFile
-  end
-  
-  -- Download image
-  web.get(imageUrl, function(err, response)
-    if err then
-      ac.log('Spotify: Failed to download album art: '..err)
-      return
-    end
-    
-    -- Save to cache
-    local file = io.open(cacheFile, 'wb')
-    if file then
-      file:write(response.body)
-      file:close()
-    end
-  end)
-  
-  return cacheFile
-end
-
 -- Add URL encoding helper function near the top with other helpers
 local function urlEncode(str)
   return str:gsub('([^%w%-_.~])', function(c)
@@ -187,7 +136,15 @@ local function parseTrackMetadata(json)
   local song = {}
   song.trackName = json.item.name or 'Unknown Track'
   song.duration = json.item.duration_ms or 0
-  song.artistName = (json.item.artists and #json.item.artists > 0 and json.item.artists[1].name) or 'Unknown Artist'
+  if json.item.artists and #json.item.artists > 0 then
+    local names = {}
+    for _, artist in ipairs(json.item.artists) do
+      table.insert(names, artist.name)
+    end
+    song.artistName = table.concat(names, ', ')
+  else
+    song.artistName = 'Unknown Artist'
+  end
   song.trackUrl = (json.item.external_urls and json.item.external_urls.spotify) or ''
   song.trackId = json.item.id or ''
 
@@ -442,7 +399,6 @@ local function pushCurrentSongToHistory()
       artistName = state.artistName,
       albumName = state.albumName,
       albumArtUrl = state.albumArtUrl,
-      albumArtPath = state.albumArtPath,
       duration = state.duration,
       trackUrl = state.trackUrl,
     }
@@ -499,7 +455,6 @@ function Spotify.prevTrack()
       Spotify.playbackState.trackUrl = prev.trackUrl
       Spotify.playbackState.albumName = prev.albumName
       Spotify.playbackState.albumArtUrl = prev.albumArtUrl
-      Spotify.playbackState.albumArtPath = prev.albumArtPath
       Spotify.playbackState.isPlaying = true
 
       ac.log('Spotify: Quick-loaded previous track from history: '..prev.trackName)
@@ -685,13 +640,6 @@ function Spotify.getCurrentTrack(callback)
           Spotify.playbackState.isLiked = false
           Spotify.checkIsLiked(song.trackId)
         end
-
-        if Spotify.appSettings.enableCache then
-          local albumHash = hashString(song.albumArtUrl)
-          Spotify.playbackState.albumArtPath = downloadAlbumArt(song.albumArtUrl, albumHash)
-        else
-          Spotify.playbackState.albumArtPath = ''
-        end
         
         Spotify.playbackState.lastUpdate = os.time()
         Spotify.playbackState.error = ''
@@ -709,7 +657,6 @@ function Spotify.clearPlaybackState()
   Spotify.playbackState.artistName = ''
   Spotify.playbackState.albumName = ''
   Spotify.playbackState.albumArtUrl = ''
-  Spotify.playbackState.albumArtPath = ''
   Spotify.playbackState.isPlaying = false
   Spotify.playbackState.duration = 0
   Spotify.playbackState.progress = 0
@@ -718,21 +665,6 @@ end
 -- Get config (for settings UI)
 function Spotify.getOauthConfig()
   return oauthConfig
-end
-
--- Clear album art cache
-function Spotify.clearAlbumArtCache()
-  if io.exists(IMAGE_CACHE_DIR) then
-    local files = io.scanDir(IMAGE_CACHE_DIR)
-    for _, file in ipairs(files) do
-      if file:match('%.png$') then
-        io.deleteFile(IMAGE_CACHE_DIR..'/'..file)
-      end
-    end
-    ui.toast(ui.Icons.Info, 'Album art cache cleared')
-  else
-    ui.toast(ui.Icons.Warning, 'Album art cache directory does not exist')
-  end
 end
 
 -- Get Queue
@@ -758,6 +690,24 @@ function Spotify.GetQueue()
       else
         ac.log('Spotify: Failed to fetch queue. Status: '..response.status)
       end
+  end)
+end
+
+function Spotify.Seek(positionMs)
+  positionMs = math.floor(positionMs)
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+
+    if has_error then
+      ac.error('Spotify: Cannot seek - '..ensure_token_err)
+      return
+    end
+
+    Spotify._Seek(positionMs, function(err, response)
+      if err then
+        ac.error('Spotify: Seek error: '..tostring(err))
+        return
+      end
+    end)
   end)
 end
 
@@ -817,6 +767,7 @@ end
 function Spotify._GetCurrentlyPlaying(callback)
   local auth_headers = {}
   auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  auth_headers['Content-Type'] = 'application/json; charset=utf-8'
 
   web.request('GET',
     SPOTIFY_API_URL..'/me/player/currently-playing',
@@ -921,8 +872,19 @@ function Spotify._GetQueue(callback)
   )
 end
 
--- Initialize - ensure cache directory exists
-ensureCacheDir()
+-- /me/player/seek?position_ms={position} - seek to position in current track
+function Spotify._Seek(positionMs, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  auth_headers['Content-Type'] = 'application/json'
+
+  web.request('PUT',
+    SPOTIFY_API_URL..'/me/player/seek?position_ms='..positionMs,
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
 
 -- Load config from INI file on startup
 Spotify.loadConfigFile()

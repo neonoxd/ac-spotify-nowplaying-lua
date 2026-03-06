@@ -1,6 +1,8 @@
 local spotify = require('spotify')
+local custom_ui = require('ui_util')
 local REFRESH_INTERVAL = 5 -- seconds between API calls
 local VOLUME_UPDATE_INTERVAL = 1 -- seconds between checking if we should update volume
+local DWRITE_FONT = "Arial Unicode MS"
 
 local spotifyRefreshTimer = REFRESH_INTERVAL + 1
 local spotifyVolumeTimer = 0
@@ -10,34 +12,8 @@ local volumeChanged = false
 local authUrl = nil
 local authUrlGenerated = false
 
---[[
-  Progress bar workaround for CSP 0.3.0-preview302
-]]
-local bgGray = rgbm(0.25, 0.22, 0.22, 1)
-local cursorPos = vec2(0, 0)
-local progressVect2 = vec2(0, 0)
-local progressSizeVect2 = vec2(0, 0)
-local titleLengthVect2 = vec2(0, 0)
-local titlePosVect2 = vec2(0, 0)
-local function drawProgressBar(value, size, color, title)
-  cursorPos:set(ui.getCursor())
-  ui.drawRectFilled(cursorPos, cursorPos + size, bgGray, 3)
-  local progress = 0
-  if value > 0 then
-    progress = size.x * value
-    progressVect2:set(progress, size.y)
-    cursorPos:add(progressVect2, progressSizeVect2)
-    ui.drawRectFilled(cursorPos, progressSizeVect2, color, 3)
-  end
-  local textLength = ui.measureText(title).x + 5
-  titleLengthVect2:set(math.max(progress - textLength, 0), 0)
-  cursorPos:add(titleLengthVect2, titlePosVect2)
-  ui.drawText(title, titlePosVect2)
-  ui.offsetCursorY(size.y + 10)
-end
---[[
-  End progress bar workaround
-]]
+local colorTheme = spotify.appSettings.colorTheme
+local colorThemeChanged = false
 
 function script.windowMain(dt)
   local state = spotify.playbackState
@@ -86,8 +62,6 @@ function script.windowMain(dt)
     spotifyVolumeTimer = 0
   end
   
-  ui.beginOutline()
-  
   -- Display error if any
   if state.error ~= '' then
     ui.pushStyleColor(ui.StyleColor.Text, rgbm(1, 0.2, 0.2, 1))
@@ -96,38 +70,40 @@ function script.windowMain(dt)
     return
   end
 
+  ui.pushStyleColor(ui.StyleColor.Text, colorTheme)
   if state.trackName and state.trackName ~= 'Nothing playing' then
     ui.beginGroup()
-    -- Display album art if available
-      if state.albumArtPath and state.albumArtPath ~= '' and io.exists(state.albumArtPath) then
-        local imageSize = math.min(200, ui.availableSpaceY() - 10)
-        ui.image(state.albumArtPath, vec2(imageSize, imageSize))
-        ui.sameLine()
-      elseif state.albumArtUrl and state.albumArtUrl ~= '' then
-        local imageSize = math.min(200, ui.availableSpaceY() - 10)
-        ui.image(state.albumArtUrl, vec2(imageSize, imageSize))
-        ui.sameLine()
-      else
-        local imageSize = math.min(64, ui.availableSpaceY() - 20)
-        ui.image("icon.png", vec2(imageSize, imageSize))
-        ui.sameLine()
-      end
 
+      -- Display album art if available
+      local availableHeight = ui.availableSpaceY()
+      custom_ui.drawVinylAlbumArt(state, dt, math.min(200, availableHeight - 10))
+
+      if ac.windowFading() > 0.5 then
+        if spotify.appSettings.showControls then
+          ui.offsetCursorY(availableHeight * 0.05)
+        else
+          ui.offsetCursorY(availableHeight * 0.20)
+        end
+      else
+        ui.offsetCursorY(availableHeight * 0.05)
+      end
       -- Metadata on right
       ui.beginGroup()
-        ui.pushFont(ui.Font.Title)
-        ui.textWrapped(state.trackName)
-        ui.popFont()
-        ui.offsetCursorY(5)
 
-        ui.pushFont(ui.Font.Main)
+        -- Title 
+        ui.pushDWriteFont(DWRITE_FONT..';Weight=Bold;')
+          ui.dwriteDrawText(state.trackName, 18, ui.getCursor(), colorTheme)
+        ui.popDWriteFont()
+        ui.offsetCursorY(26)
+
+        -- Artist
         if state.artistName ~= '' then
-          ui.textWrapped('Artist: '..state.artistName)
+          ui.pushDWriteFont(DWRITE_FONT)
+            local colorThemeDimmed = colorTheme * rgbm(0.7, 0.7, 0.7, 0.8)
+            ui.dwriteDrawText(state.artistName, 16, ui.getCursor(), colorThemeDimmed)
+          ui.popDWriteFont()
+          ui.offsetCursorY(24)
         end
-        if state.albumName ~= '' then
-          ui.textWrapped('Album: '..state.albumName)
-        end
-        ui.popFont()
 
         -- Display play progress
         if state.duration > 0 then
@@ -142,23 +118,27 @@ function script.windowMain(dt)
           local progressSec = math.floor((state.progress / 1000) % 60)
           ui.text(string.format('Progress: %d:%02d / %d:%02d', 
             progressMin, progressSec, durationMin, durationSec))
-          --ui.progressBar(progressPercent / 100, vec2(ui.availableSpaceX(), 4))
-          drawProgressBar(progressPercent / 100, vec2(ui.availableSpaceX(), 5), rgbm(1,1,1, 1), "")
+          custom_ui.drawProgressBar(progressPercent / 100, vec2(ui.availableSpaceX(), 5), colorTheme, 
+          function (percent)
+            local newProgress = percent * state.duration
+            spotify.Seek(newProgress)
+            state.progress = newProgress
+          end)
         end
 
         -- Controls
-        if spotify.appSettings.showControls or ac.windowFading() ~= 1 then
+        if spotify.appSettings.showControls or ac.windowFading() < 0.5 then
           ui.pushFont(ui.Font.Main)
           if ui.iconButton('controls/prev.png', vec2(24, 24)) then
             spotify.prevTrack()
           end
           ui.sameLine()
           if state.isPlaying then
-            if ui.iconButton('controls/pause.png', vec2(24, 24)) then
+            if ui.iconButton('controls/pause.png', vec2(32, 24)) then
               spotify.pause()
             end
           else
-            if ui.iconButton('controls/play.png', vec2(24, 24)) then
+            if ui.iconButton('controls/play.png', vec2(32, 24)) then
               spotify.play()
             end
           end
@@ -168,7 +148,7 @@ function script.windowMain(dt)
           end
           ui.sameLine()
           local likeLabel = state.isLiked and '♥' or '♡'
-          if ui.button(likeLabel..'##Like', vec2(24, 24)) then
+          if ui.button(likeLabel..'##Like', vec2(32, 24)) then
             if state.isLiked then
               spotify.unlikeTrack()
             else
@@ -184,15 +164,15 @@ function script.windowMain(dt)
             volumeChanged = true
           end
 
+          -- Spotify track URL
+          if spotify.appSettings.showLink and state.trackUrl ~= '' then
+            ui.copyable(state.trackUrl)
+          end
+
         end
 
       ui.endGroup()
     ui.endGroup()
-
-    -- Spotify track URL
-    if spotify.appSettings.showLink and state.trackUrl ~= '' then
-      ui.copyable(state.trackUrl)
-    end
 
   else
     -- No track playing, show placeholder
@@ -211,8 +191,7 @@ function script.windowMain(dt)
       ui.endGroup()
     ui.endGroup()
   end
-  
-  ui.endOutline(rgbm(0, 0, 0, ac.windowFading()), 1)
+  ui.popStyleColor()
 end
 
 function script.windowSettings(dt)
@@ -335,10 +314,6 @@ function script.windowSettings(dt)
   ui.text('Settings')
   ui.separator()
 
-  if ui.button('Clear Album Art Cache', vec2(ui.availableSpaceX(), 0)) then
-    spotify.clearAlbumArtCache()
-  end
-
   ac.debug('_showLink: ', spotify.appSettings.showLink)
   ac.debug('_showControls: ', spotify.appSettings.showControls)
 
@@ -350,8 +325,23 @@ function script.windowSettings(dt)
     spotify.appSettings.showControls = not spotify.appSettings.showControls
   end
 
-  if ui.checkbox('Enable Album Art Caching', spotify.appSettings.enableCache) then
-    spotify.appSettings.enableCache = not spotify.appSettings.enableCache
+  ui.text("App Color Theme")
+  ui.separator()
+
+  if ui.colorButton("Color", colorTheme) then
+    ui.openPopup("picker")
+  end
+  ui.sameLine()
+  ui.text("Pick a color theme for the app")
+
+  if ui.beginPopup("picker") then
+      colorThemeChanged = ui.colorPicker("picker_color", colorTheme)
+      ui.endPopup()
+  end
+
+  if colorThemeChanged then
+    spotify.appSettings.colorTheme = colorTheme
+    colorThemeChanged = false
   end
 
 end
