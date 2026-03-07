@@ -16,6 +16,7 @@ local colorTheme = spotify.appSettings.colorTheme
 local colorThemeChanged = false
 
 function script.windowMain(dt)
+  
   local state = spotify.playbackState
   local config = spotify.getOauthConfig()
 
@@ -70,6 +71,16 @@ function script.windowMain(dt)
     return
   end
 
+  -- Update progress locally for smoother UI
+  if state.isPlaying then
+    state.progress = state.progress + (dt * 1000)
+    state.progress = math.min(state.progress, state.duration)
+  end
+
+  if ac.windowFading() > 0.5 and spotify.appSettings.showOnHover then
+    return
+  end
+
   ui.pushStyleColor(ui.StyleColor.Text, colorTheme)
   if state.trackName and state.trackName ~= 'Nothing playing' then
     ui.beginGroup()
@@ -107,10 +118,6 @@ function script.windowMain(dt)
 
         -- Display play progress
         if state.duration > 0 then
-          if state.isPlaying then
-            state.progress = state.progress + (dt * 1000)
-            state.progress = math.min(state.progress, state.duration)
-          end
           local progressPercent = (state.progress / state.duration) * 100
           local durationMin = math.floor(state.duration / 1000 / 60)
           local durationSec = math.floor((state.duration / 1000) % 60)
@@ -323,6 +330,10 @@ function script.windowSettings(dt)
 
   if ui.checkbox('Always Show Track Controls', spotify.appSettings.showControls) then
     spotify.appSettings.showControls = not spotify.appSettings.showControls
+  end
+
+  if ui.checkbox('Only Show on Hover', spotify.appSettings.showOnHover) then
+    spotify.appSettings.showOnHover = not spotify.appSettings.showOnHover
   end
 
   ui.text("App Color Theme")

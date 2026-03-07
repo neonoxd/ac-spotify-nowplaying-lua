@@ -31,7 +31,8 @@ local oauthConfig = ac.storage{
 Spotify.appSettings = ac.storage{
   showControls = false,
   showLink = false,
-  colorTheme = rgbm(1, 1, 1, 1)
+  colorTheme = rgbm(1, 1, 1, 1),
+  showOnHover = false,
 }
 
 -- Song history stack for quick-loading previous track metadata
