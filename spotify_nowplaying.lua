@@ -15,10 +15,43 @@ local authUrlGenerated = false
 local colorTheme = spotify.appSettings.colorTheme
 local colorThemeChanged = false
 
+local receivedTracks = {}
+local SHARE_COOLDOWN = 2
+local timeSinceShare = 0
+
+local chatMessageEvent = nil
+local sim = ac.getSim()
+
+if sim.isOnlineRace then
+
+  chatMessageEvent = ac.OnlineEvent({
+    spotifySongId = ac.StructItem.string(),
+    spotifySongTitle = ac.StructItem.string(128),
+    spotifySongArtist = ac.StructItem.string(128),
+    spotifyAlbumArtUrl = ac.StructItem.string(128),
+  }, function (sender, data)
+    ac.debug('Got message: from', sender and sender.index or -1)
+    if sender.index == 0 or not spotify.appSettings.enableSharing then
+      return
+    end
+    
+    table.insert(receivedTracks, {
+      id = data.spotifySongId,
+      title = data.spotifySongTitle,
+      artist = data.spotifySongArtist,
+      albumArtUrl = data.spotifyAlbumArtUrl,
+      senderName = sender and sender:driverName() or 'Unknown',
+    })
+  end)
+
+end
+
 function script.windowMain(dt)
   
   local state = spotify.playbackState
   local config = spotify.getOauthConfig()
+
+  ac.debug('receivedTracks: ', receivedTracks)
 
   -- DEBUG
   ac.debug('..trackName: ', state.trackName)
@@ -44,6 +77,12 @@ function script.windowMain(dt)
 
   spotifyRefreshTimer = spotifyRefreshTimer + dt
   spotifyVolumeTimer = spotifyVolumeTimer + dt
+  timeSinceShare = timeSinceShare + dt
+
+  -- Reset share timer after 10 seconds to prevent overflow
+  if timeSinceShare > 10 then
+    timeSinceShare = SHARE_COOLDOWN
+  end
   
   -- Fetch current track every REFRESH_INTERVAL seconds
   if spotifyRefreshTimer > REFRESH_INTERVAL then
@@ -162,7 +201,58 @@ function script.windowMain(dt)
               spotify.likeTrack()
             end
           end
+        if ui.itemHovered() then
+            ui.setTooltip(state.isLiked and 'Unlike this track' or 'Like this track')
+          end
           ui.popFont()
+
+          if spotify.appSettings.enableSharing and sim.isOnlineRace then
+            -- Align Right
+            -- Share button
+            ui.sameLine()
+            ui.setCursorX(ui.getCursorX() + ui.availableSpaceX() - (24 + 24))
+            if ui.iconButton('controls/share.png', vec2(24, 24)) then
+              if timeSinceShare > SHARE_COOLDOWN and chatMessageEvent then
+                chatMessageEvent{
+                  spotifySongId = spotify.playbackState.trackId or '',
+                  spotifySongTitle = spotify.playbackState.trackName or '',
+                  spotifySongArtist = spotify.playbackState.artistName or '',
+                  spotifyAlbumArtUrl = spotify.playbackState.albumArtUrl or '',
+                }
+                ui.toast(ui.Icons.Info, 'Song shared!')
+                timeSinceShare = 0
+              else
+                ui.toast(ui.Icons.Warning, 'Please wait before sharing again')
+              end
+            end
+
+            if ui.itemHovered() then
+              ui.setTooltip('Share this song with other drivers in your session!')
+            end
+  
+            -- Inbox button with badge
+            ui.sameLine()
+            local inboxPos = ui.getCursor()
+            if ui.iconButton('controls/inbox.png', vec2(24, 24)) then
+              ui.openPopup('receivedSharesPopup')
+            end
+
+            if ui.itemHovered() then
+              ui.setTooltip('Select a song shared by other drivers to add it to your queue!')
+            end
+
+            -- Draw badge if there are received tracks
+            if #receivedTracks > 0 then
+              local badgeRadius = 7
+              local badgeCenter = vec2(inboxPos.x + 20, inboxPos.y + 2)
+              ui.drawCircleFilled(badgeCenter, badgeRadius, rgbm(1, 0, 0, 1), 12)
+              ui.pushFont(ui.Font.Small)
+              local countStr = tostring(#receivedTracks)
+              local textSize = ui.measureText(countStr)
+              ui.drawText(countStr, badgeCenter - textSize * 0.5, rgbm(1, 1, 1, 1))
+              ui.popFont()
+            end
+          end
 
           -- Volume control
           local value, changed = ui.slider('##VolumeSlider', state.volume, 0, 100, 'Volume: %.0f%%')
@@ -171,14 +261,59 @@ function script.windowMain(dt)
             volumeChanged = true
           end
 
-          -- Spotify track URL
-          if spotify.appSettings.showLink and state.trackUrl ~= '' then
-            ui.copyable(state.trackUrl)
-          end
-
         end
 
       ui.endGroup()
+
+      -- Render received tracks popup
+      if ui.beginPopup('receivedSharesPopup') then
+        ui.text('Received Tracks from Drivers:')
+        if #receivedTracks == 0 then
+          ui.separator()
+          ui.text('No tracks received yet.')
+        else
+          for i, track in ipairs(receivedTracks) do
+            ui.separator()
+            local rowHeight = 50
+            local cursor = ui.getCursor()
+
+            -- Draw album art
+            ui.image(track.albumArtUrl, vec2(rowHeight, rowHeight))
+
+            -- Draw text next to artwork
+            ui.setCursor(vec2(cursor.x + rowHeight + 8, cursor.y + 4))
+            ui.pushDWriteFont(DWRITE_FONT..';Weight=Bold;')
+              ui.dwriteDrawText(track.title, 14, ui.getCursor(), colorTheme)
+            ui.popDWriteFont()
+
+            ui.setCursor(vec2(cursor.x + rowHeight + 8, cursor.y + 22))
+            ui.pushDWriteFont(DWRITE_FONT)
+              -- artist name
+              ui.dwriteDrawText(track.artist, 12, ui.getCursor(), colorTheme * rgbm(0.7, 0.7, 0.7, 0.8))
+              -- sender name
+              ui.offsetCursorY(16)
+              ui.dwriteDrawText('Shared by: '..track.senderName, 10, ui.getCursor(), colorTheme * rgbm(0.7, 0.7, 0.7, 0.6))
+            ui.popDWriteFont()
+
+            -- Overlay a selectable on the entire row for click handling
+            ui.setCursor(cursor)
+            if ui.selectable('##track_'..i, false, 0, vec2(ui.availableSpaceX(), rowHeight)) then
+              spotify.AddToQueue(track.id)
+              ui.toast(ui.Icons.Info, 'Added ['..track.title..']'..' to the queue!')
+              table.remove(receivedTracks, i)
+            end
+            if ui.itemHovered() then
+              ui.setTooltip('Click to add to queue')
+            end
+          end
+          ui.separator()
+          if ui.menuItem('Clear List') then
+            receivedTracks = {}
+          end
+        end
+        ui.endPopup()
+      end
+
     ui.endGroup()
 
   else
@@ -321,11 +456,8 @@ function script.windowSettings(dt)
   ui.text('Settings')
   ui.separator()
 
-  ac.debug('_showLink: ', spotify.appSettings.showLink)
-  ac.debug('_showControls: ', spotify.appSettings.showControls)
-
-  if ui.checkbox('Show Spotify Link', spotify.appSettings.showLink) then
-    spotify.appSettings.showLink = not spotify.appSettings.showLink
+  if ui.checkbox('Enable Song Sharing', spotify.appSettings.enableSharing) then
+    spotify.appSettings.enableSharing = not spotify.appSettings.enableSharing
   end
 
   if ui.checkbox('Always Show Track Controls', spotify.appSettings.showControls) then
@@ -355,29 +487,4 @@ function script.windowSettings(dt)
     colorThemeChanged = false
   end
 
-end
-
-function script.windowQueue(dt)
-  ui.text('Queue')
-  ui.separator()
-  if ui.button('Refresh Queue', vec2(ui.availableSpaceX(), 0)) then
-    spotify.GetQueue()
-  end
-
-  ui.beginGroup()
-  if spotify.playbackState.queue and #spotify.playbackState.queue > 0 then
-    for i, item in ipairs(spotify.playbackState.queue) do
-      ui.image(item.albumArtUrl or 'icon.png', vec2(32, 32))
-      ui.sameLine()
-      --ui.text(string.format('%d. %s - %s', i, item.trackName, item.artistName))
-      ui.beginGroup()
-        ui.text(item.trackName)
-        ui.text(item.artistName)
-      ui.endGroup()
-      ui.separator()
-    end
-  else
-    ui.text('Queue is empty or not available.')
-  end
-  ui.endGroup()
 end

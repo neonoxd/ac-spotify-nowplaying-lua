@@ -30,9 +30,9 @@ local oauthConfig = ac.storage{
 
 Spotify.appSettings = ac.storage{
   showControls = false,
-  showLink = false,
   colorTheme = rgbm(1, 1, 1, 1),
   showOnHover = false,
+  enableSharing = true,
 }
 
 -- Song history stack for quick-loading previous track metadata
@@ -694,6 +694,28 @@ function Spotify.GetQueue()
   end)
 end
 
+-- Add track to queue by Track ID
+function Spotify.AddToQueue(trackId)
+  if not trackId or trackId == '' then
+    return
+  end
+
+  Spotify.ensureValidToken(function(has_error, ensure_token_err)
+    if has_error then
+      ac.error('Spotify: Cannot add to queue - '..ensure_token_err)
+      return
+    end
+
+    Spotify._AddToQueue(trackId, function(err, response)
+      if err then
+        ac.error('Spotify: Add to queue error: '..tostring(err))
+        return
+      end
+    end)
+  end)
+end
+
+-- Seek to position in current track
 function Spotify.Seek(positionMs)
   positionMs = math.floor(positionMs)
   Spotify.ensureValidToken(function(has_error, ensure_token_err)
@@ -881,6 +903,20 @@ function Spotify._Seek(positionMs, callback)
 
   web.request('PUT',
     SPOTIFY_API_URL..'/me/player/seek?position_ms='..positionMs,
+    auth_headers, '', function(err, response)
+      if callback then callback(err, response) end
+    end
+  )
+end
+
+-- /me/player/queue?uri={uri} - add track to queue
+function Spotify._AddToQueue(trackId, callback)
+  local auth_headers = {}
+  auth_headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
+  auth_headers['Content-Type'] = 'application/json' 
+
+  web.request('POST',
+    SPOTIFY_API_URL..'/me/player/queue?uri='.."spotify:track:"..trackId,
     auth_headers, '', function(err, response)
       if callback then callback(err, response) end
     end
