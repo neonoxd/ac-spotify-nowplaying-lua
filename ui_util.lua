@@ -87,4 +87,15 @@ function custom_ui.drawVinylAlbumArt(state, dt, size)
   ui.setCursor(vec2(cursor.x + size + 8, cursor.y))
 end
 
+function custom_ui.drawNumberedBadge(position, number, badgeColor, textColor)
+  local badgeRadius = 7
+  local badgeCenter = position
+  ui.drawCircleFilled(badgeCenter, badgeRadius, badgeColor, 12)
+  ui.pushFont(ui.Font.Small)
+  local countStr = tostring(number)
+  local textSize = ui.measureText(countStr)
+  ui.drawText(countStr, badgeCenter - textSize * 0.5, textColor or rgbm(1, 1, 1, 1))
+  ui.popFont()
+end
+
 return custom_ui

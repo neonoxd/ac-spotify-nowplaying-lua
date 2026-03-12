@@ -1,27 +1,31 @@
 local spotify = require('spotify')
 local custom_ui = require('ui_util')
+
 local REFRESH_INTERVAL = 5 -- seconds between API calls
 local VOLUME_UPDATE_INTERVAL = 1 -- seconds between checking if we should update volume
 local DWRITE_FONT = "Arial Unicode MS"
 
 local spotifyRefreshTimer = REFRESH_INTERVAL + 1
-local spotifyVolumeTimer = 0
-local spotifyAuthCodeInput = ''
-local volumeChanged = false
 
+local spotifyVolumeTimer = 0
+local volumeChanged = false
+local volumeTarget = -1
+
+local spotifyAuthCodeInput = ''
 local authUrl = nil
 local authUrlGenerated = false
 
+-- Color theme
 local colorTheme = spotify.appSettings.colorTheme
 local colorThemeChanged = false
 
+-- Sharing
 local receivedTracks = {}
 local SHARE_COOLDOWN = 2
 local timeSinceShare = 0
 
 local chatMessageEvent = nil
 local sim = ac.getSim()
-
 if sim.isOnlineRace then
 
   chatMessageEvent = ac.OnlineEvent({
@@ -46,13 +50,8 @@ if sim.isOnlineRace then
 
 end
 
-function script.windowMain(dt)
-  
+local function updateState(dt)
   local state = spotify.playbackState
-  local config = spotify.getOauthConfig()
-
-  ac.debug('receivedTracks: ', receivedTracks)
-
   -- DEBUG
   ac.debug('..trackName: ', state.trackName)
   ac.debug('..artistName: ', state.artistName)
@@ -62,6 +61,43 @@ function script.windowMain(dt)
   ac.debug('..progress: ', state.progress)
   ac.debug('..error: ', state.error)
   ac.debug('..volume: ', state.volume)
+
+  -- Fetch current track every REFRESH_INTERVAL seconds
+  spotifyRefreshTimer = spotifyRefreshTimer + dt
+  if spotifyRefreshTimer > REFRESH_INTERVAL then
+    spotify.getPlaybackState()
+    spotifyRefreshTimer = 0
+  end
+
+  -- Update progress locally for smoother UI
+  if state.isPlaying then
+    state.progress = state.progress + (dt * 1000)
+    state.progress = math.min(state.progress, state.duration)
+  end
+
+  -- Reset share timer after 10 seconds to prevent overflow
+  timeSinceShare = timeSinceShare + dt
+  if timeSinceShare > 10 then
+    timeSinceShare = SHARE_COOLDOWN
+  end
+end
+
+local function updateVolume(dt)
+  spotifyVolumeTimer = spotifyVolumeTimer + dt
+  -- Update volume every VOLUME_UPDATE_INTERVAL seconds
+  if spotifyVolumeTimer > VOLUME_UPDATE_INTERVAL then
+    if volumeChanged then
+      spotify.setVolume(volumeTarget)
+      volumeChanged = false
+    end
+    spotifyVolumeTimer = 0
+  end
+end
+
+function script.windowMain(dt)
+  
+  local state = spotify.playbackState
+  local config = spotify.getOauthConfig()
 
   -- If not authenticated, show message and return early
   if config.refreshToken == '' or config.accessToken == '' then
@@ -75,32 +111,8 @@ function script.windowMain(dt)
     return
   end
 
-  spotifyRefreshTimer = spotifyRefreshTimer + dt
-  spotifyVolumeTimer = spotifyVolumeTimer + dt
-  timeSinceShare = timeSinceShare + dt
-
-  -- Reset share timer after 10 seconds to prevent overflow
-  if timeSinceShare > 10 then
-    timeSinceShare = SHARE_COOLDOWN
-  end
-  
-  -- Fetch current track every REFRESH_INTERVAL seconds
-  if spotifyRefreshTimer > REFRESH_INTERVAL then
-    spotify.getCurrentTrack()
-    if not volumeChanged then
-      spotify.getVolume()
-    end
-    spotifyRefreshTimer = 0
-  end
-
-  -- Update volume every VOLUME_UPDATE_INTERVAL seconds
-  if spotifyVolumeTimer > VOLUME_UPDATE_INTERVAL then
-    if volumeChanged then
-      spotify.setVolume(state.volume)
-      volumeChanged = false
-    end
-    spotifyVolumeTimer = 0
-  end
+  updateState(dt)
+  updateVolume(dt)
   
   -- Display error if any
   if state.error ~= '' then
@@ -108,12 +120,6 @@ function script.windowMain(dt)
     ui.textWrapped(state.error)
     ui.popStyleColor()
     return
-  end
-
-  -- Update progress locally for smoother UI
-  if state.isPlaying then
-    state.progress = state.progress + (dt * 1000)
-    state.progress = math.min(state.progress, state.duration)
   end
 
   if ac.windowFading() > 0.5 and spotify.appSettings.showOnHover then
@@ -127,7 +133,7 @@ function script.windowMain(dt)
       -- Display album art if available
       local availableHeight = ui.availableSpaceY()
       custom_ui.drawVinylAlbumArt(state, dt, math.min(200, availableHeight - 10))
-
+      
       if ac.windowFading() > 0.5 then
         if spotify.appSettings.showControls then
           ui.offsetCursorY(availableHeight * 0.05)
@@ -137,6 +143,14 @@ function script.windowMain(dt)
       else
         ui.offsetCursorY(availableHeight * 0.05)
       end
+
+      -- Badge if not focused
+      if #receivedTracks > 0 and ac.windowFading() > 0.5 then
+          local cursorPos = ui.getCursor()
+          local badgeCenter = vec2(cursorPos.x, cursorPos.y)
+          custom_ui.drawNumberedBadge(badgeCenter, #receivedTracks, rgbm(1, 0, 0, 1), rgbm(1, 1, 1, 1))
+      end
+
       -- Metadata on right
       ui.beginGroup()
 
@@ -243,14 +257,8 @@ function script.windowMain(dt)
 
             -- Draw badge if there are received tracks
             if #receivedTracks > 0 then
-              local badgeRadius = 7
               local badgeCenter = vec2(inboxPos.x + 20, inboxPos.y + 2)
-              ui.drawCircleFilled(badgeCenter, badgeRadius, rgbm(1, 0, 0, 1), 12)
-              ui.pushFont(ui.Font.Small)
-              local countStr = tostring(#receivedTracks)
-              local textSize = ui.measureText(countStr)
-              ui.drawText(countStr, badgeCenter - textSize * 0.5, rgbm(1, 1, 1, 1))
-              ui.popFont()
+              custom_ui.drawNumberedBadge(badgeCenter, #receivedTracks, rgbm(1, 0, 0, 1), rgbm(1, 1, 1, 1))
             end
           end
 
@@ -258,6 +266,7 @@ function script.windowMain(dt)
           local value, changed = ui.slider('##VolumeSlider', state.volume, 0, 100, 'Volume: %.0f%%')
           if changed then
             state.volume = value
+            volumeTarget = value
             volumeChanged = true
           end
 
