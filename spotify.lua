@@ -55,6 +55,7 @@ Spotify.playbackState = {
   isLiked = false,
   volume = 0,
   queue = {},
+  type = 'track', -- or 'episode'
 }
 
 -- Load config from INI file to ac.storage
@@ -135,6 +136,7 @@ end
 -- Parse Song Metadata
 local function parseTrackMetadata(json)
   local song = {}
+
   song.trackName = json.item.name or 'Unknown Track'
   song.duration = json.item.duration_ms or 0
   if json.item.artists and #json.item.artists > 0 then
@@ -143,6 +145,8 @@ local function parseTrackMetadata(json)
       table.insert(names, artist.name)
     end
     song.artistName = table.concat(names, ', ')
+  elseif json.currently_playing_type == 'episode' then
+    song.artistName = (json.item.show and json.item.show.publisher) or 'Unknown Publisher'
   else
     song.artistName = 'Unknown Artist'
   end
@@ -152,10 +156,15 @@ local function parseTrackMetadata(json)
   if json.item.album then
     song.albumArtUrl = (json.item.album.images and #json.item.album.images > 0 and json.item.album.images[1].url) or ''
     song.albumName = json.item.album.name or ''
+  elseif json.item.images and json.currently_playing_type == 'episode' then
+    song.albumArtUrl = (json.item.images and #json.item.images > 0 and json.item.images[1].url) or ''
+    song.albumName = json.item.show and json.item.show.name or ''
   else
     song.albumArtUrl = ''
     song.albumName = ''
   end
+
+  song.currently_playing_type = json.currently_playing_type or 'track'
 
   return song
 end
@@ -593,6 +602,8 @@ function Spotify.getPlaybackState()
         Spotify.playbackState.albumName = song.albumName
         Spotify.playbackState.albumArtUrl = song.albumArtUrl
 
+        Spotify.playbackState.type = song.currently_playing_type or 'track'
+
         -- Check liked status when track changes
         if trackChanged then
           Spotify.playbackState.isLiked = false
@@ -754,7 +765,7 @@ function Spotify._GetPlayerState(callback)
   headers['Authorization'] = 'Bearer '..oauthConfig.accessToken
   headers['Content-Type'] = 'application/json; charset=utf-8'
   web.request('GET',
-    SPOTIFY_API_URL..'/me/player',
+    SPOTIFY_API_URL..'/me/player?additional_types=track,episode',
     headers, '', function(err, response)
       if callback then callback(err, response) end
     end
@@ -768,7 +779,7 @@ function Spotify._GetCurrentlyPlaying(callback)
   headers['Content-Type'] = 'application/json; charset=utf-8'
 
   web.request('GET',
-    SPOTIFY_API_URL..'/me/player/currently-playing',
+    SPOTIFY_API_URL..'/me/player/currently-playing?additional_types=track,episode',
     headers, '', function(err, response)
       if callback then callback(err, response) end
     end

@@ -24,6 +24,9 @@ local receivedTracks = {}
 local SHARE_COOLDOWN = 2
 local timeSinceShare = 0
 
+-- Album name swapping
+local albumSwapTimer = 0
+
 local chatMessageEvent = nil
 local sim = ac.getSim()
 if sim.isOnlineRace then
@@ -61,12 +64,18 @@ local function updateState(dt)
   ac.debug('..progress: ', state.progress)
   ac.debug('..error: ', state.error)
   ac.debug('..volume: ', state.volume)
+  ac.debug('..currently_playing_type: ', state.type)
 
   -- Fetch current track every REFRESH_INTERVAL seconds
   spotifyRefreshTimer = spotifyRefreshTimer + dt
   if spotifyRefreshTimer > REFRESH_INTERVAL then
     spotify.getPlaybackState()
     spotifyRefreshTimer = 0
+  end
+
+  albumSwapTimer = albumSwapTimer + dt
+  if albumSwapTimer > 10 then
+    albumSwapTimer = 0
   end
 
   -- Update progress locally for smoother UI
@@ -164,7 +173,11 @@ function script.windowMain(dt)
         if state.artistName ~= '' then
           ui.pushDWriteFont(DWRITE_FONT)
             local colorThemeDimmed = colorTheme * rgbm(0.7, 0.7, 0.7, 0.8)
-            ui.dwriteDrawText(state.artistName, 16, ui.getCursor(), colorThemeDimmed)
+            if albumSwapTimer < 5 and state.type == 'episode' then
+              ui.dwriteDrawText(state.albumName, 16, ui.getCursor(), colorThemeDimmed)
+            else
+              ui.dwriteDrawText(state.artistName, 16, ui.getCursor(), colorThemeDimmed)
+            end
           ui.popDWriteFont()
           ui.offsetCursorY(24)
         end
