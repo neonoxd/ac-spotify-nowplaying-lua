@@ -575,7 +575,10 @@ function script.windowProgress(dt)
       ui.offsetCursor(margin)
       local artSize = ui.availableSpaceY() - margin
       if state.albumArtUrl and state.albumArtUrl ~= '' then
-        ui.image(state.albumArtUrl, vec2(artSize, artSize))
+        local cursor = ui.getCursor()
+        ui.drawImageRounded(state.albumArtUrl, cursor, cursor + vec2(artSize, artSize), 4)
+        ui.offsetCursorX(artSize)
+        
       else
         ui.image("icon.png", vec2(artSize, artSize))
       end

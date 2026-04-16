@@ -43,7 +43,7 @@ local vinylDir = 1
 local vinylSpeed = 25
 local vinylSpeeds = {25, 50, 75, 100}
 function custom_ui.drawVinylAlbumArt(state, dt, size)
-  local artPath = state.albumArtUrl ~= '' and state.albumArtUrl or 'images/vinyl.png' 
+  local artPath = state.albumArtUrl ~= '' and ui.isImageReady(state.albumArtUrl) and state.albumArtUrl or 'images/vinyl.png'
 
   local cursor = ui.getCursor()
   local radius = size / 2

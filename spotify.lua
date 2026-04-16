@@ -424,6 +424,9 @@ function Spotify.nextTrack()
           -- Album
           Spotify.playbackState.albumName = song.albumName
           Spotify.playbackState.albumArtUrl = song.albumArtUrl
+          ui.onImageReady(song.albumArtUrl, function()
+            Spotify.extractDominantColor(song.albumArtUrl)
+          end)
         end
       end
     end)
@@ -761,7 +764,9 @@ function Spotify.getPlaybackState()
           Spotify.checkIsLiked(song.trackId)
           -- Extract dominant color from album art
           if song.albumArtUrl and song.albumArtUrl ~= '' then
-            Spotify.extractDominantColor(song.albumArtUrl)
+            ui.onImageReady(song.albumArtUrl, function()
+              Spotify.extractDominantColor(song.albumArtUrl)
+            end)
           end
         end
 
