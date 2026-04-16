@@ -4,6 +4,18 @@ local custom_ui = require('ui_util')
 local REFRESH_INTERVAL = 5 -- seconds between API calls
 local VOLUME_UPDATE_INTERVAL = 1 -- seconds between checking if we should update volume
 local DWRITE_FONT = "Arial Unicode MS"
+local COLOR_LERP_SPEED = 3 -- how fast color transitions (higher = faster)
+
+-- Helper function to lerp between two RGBM colors
+local function lerpColor(current, target, t)
+  if not current or not target then return target or current end
+  return rgbm(
+    current.r + (target.r - current.r) * t,
+    current.g + (target.g - current.g) * t,
+    current.b + (target.b - current.b) * t,
+    current.mult + (target.mult - current.mult) * t
+  )
+end
 
 local spotifyRefreshTimer = REFRESH_INTERVAL + 1
 
@@ -17,7 +29,7 @@ local authUrlGenerated = false
 
 -- Color theme
 local colorTheme = spotify.appSettings.colorTheme
-local colorThemeChanged = false
+local colorThemeTarget = spotify.appSettings.colorTheme
 
 -- Sharing
 local receivedTracks = {}
@@ -64,6 +76,7 @@ local function updateState(dt)
   ac.debug('..progress: ', state.progress)
   ac.debug('..error: ', state.error)
   ac.debug('..volume: ', state.volume)
+  ac.debug('..dominantColor: ', state.dominantColor)
   ac.debug('..currently_playing_type: ', state.type)
 
   -- Fetch current track every REFRESH_INTERVAL seconds
@@ -107,6 +120,10 @@ function script.windowMain(dt)
   
   local state = spotify.playbackState
   local config = spotify.getOauthConfig()
+  
+  -- Update target color and lerp towards it
+  colorThemeTarget = spotify.appSettings.useAlbumColor and state.dominantColor or spotify.appSettings.colorTheme
+  colorTheme = lerpColor(colorTheme, colorThemeTarget, math.min(1, dt * COLOR_LERP_SPEED))
 
   -- If not authenticated, show message and return early
   if config.refreshToken == '' or config.accessToken == '' then
@@ -141,16 +158,21 @@ function script.windowMain(dt)
 
       -- Display album art if available
       local availableHeight = ui.availableSpaceY()
-      custom_ui.drawVinylAlbumArt(state, dt, math.min(200, availableHeight - 10))
+      local imageSize = math.min(200, math.max(120, availableHeight - 20))
+
+      -- Height approximation, TODO: measure
+      local noControlsHeight = 40
+      local withControlsHeight = 70
+      custom_ui.drawVinylAlbumArt(state, dt, imageSize)
       
       if ac.windowFading() > 0.5 then
         if spotify.appSettings.showControls then
-          ui.offsetCursorY(availableHeight * 0.05)
+          ui.offsetCursorY(imageSize / 2 - withControlsHeight)
         else
-          ui.offsetCursorY(availableHeight * 0.20)
+          ui.offsetCursorY(imageSize / 2 - noControlsHeight)
         end
       else
-        ui.offsetCursorY(availableHeight * 0.05)
+        ui.offsetCursorY(imageSize / 2 - withControlsHeight)
       end
 
       -- Badge if not focused
@@ -493,20 +515,221 @@ function script.windowSettings(dt)
   ui.text("App Color Theme")
   ui.separator()
 
-  if ui.colorButton("Color", colorTheme) then
-    ui.openPopup("picker")
+  if ui.checkbox('Use Album Art as Color theme', spotify.appSettings.useAlbumColor) then
+    spotify.appSettings.useAlbumColor = not spotify.appSettings.useAlbumColor
   end
-  ui.sameLine()
-  ui.text("Pick a color theme for the app")
+
+  if not spotify.appSettings.useAlbumColor then
+    if ui.colorButton("Color", colorTheme) then
+      ui.openPopup("picker")
+    end
+    ui.sameLine()
+    ui.text("Pick a color theme for the app")
+  end
 
   if ui.beginPopup("picker") then
-      colorThemeChanged = ui.colorPicker("picker_color", colorTheme)
+      ui.colorPicker("picker_color", spotify.appSettings.colorTheme)
       ui.endPopup()
   end
 
-  if colorThemeChanged then
-    spotify.appSettings.colorTheme = colorTheme
-    colorThemeChanged = false
+end
+
+function script.windowAlbum(dt)
+  local state = spotify.playbackState
+  local imageSize = math.min(ui.availableSpaceY(), ui.availableSpaceX())
+  if spotify.extraSettings.albumArtMode == 'vinyl' then
+    custom_ui.drawVinylAlbumArt(state, dt, imageSize)
+  else
+    if state.albumArtUrl and state.albumArtUrl ~= '' then
+      ui.image(state.albumArtUrl, vec2(imageSize, imageSize))
+    else
+      ui.image("icon.png", vec2(imageSize, imageSize))
+    end
+  end
+end
+
+function script.windowProgress(dt)
+  local state = spotify.playbackState
+  local margin = 10
+  local _colorTheme = spotify.extraSettings.useGlobalColors and colorTheme or spotify.extraSettings.colorThemeExtra
+  
+  -- Draw a rounded square for background if enabled
+  if spotify.extraSettings.progressBarBackground then
+    local cursorPos = ui.getCursor()
+    local size = vec2(ui.availableSpaceX(), ui.availableSpaceY())
+
+    local luminance = _colorTheme.r * 0.299 + _colorTheme.g * 0.587 + _colorTheme.b * 0.114
+    local invertedColor = luminance > 0.7
+      and rgbm(0, 0, 0, 0.6)      -- dark background
+      or rgbm(1, 1, 1, 0.15)      -- light background
+    local bgColor = spotify.extraSettings.progressBarBackgroundInvert and invertedColor or spotify.extraSettings.colorThemeExtraBg
+
+    ui.drawRectFilled(cursorPos, vec2(cursorPos.x + size.x, cursorPos.y + size.y), bgColor, 8)
   end
 
+  ui.beginGroup()
+
+  ui.beginGroup()
+    if spotify.extraSettings.showAlbumArt then
+      -- Album Art
+      ui.offsetCursor(margin)
+      local artSize = ui.availableSpaceY() - margin
+      if state.albumArtUrl and state.albumArtUrl ~= '' then
+        ui.image(state.albumArtUrl, vec2(artSize, artSize))
+      else
+        ui.image("icon.png", vec2(artSize, artSize))
+      end
+    end
+  ui.endGroup()
+  ui.sameLine()
+  ui.beginGroup()
+    -- metadata and progress bar
+    if spotify.extraSettings.showSongDetails then
+      local fontSize = spotify.extraSettings.songDetailsFontSize
+      ui.offsetCursorY(margin - 4)
+      -- Title 
+      ui.pushDWriteFont(DWRITE_FONT..';Weight=Bold;')
+        ui.dwriteDrawText(state.trackName, fontSize, ui.getCursor(), _colorTheme)
+      ui.popDWriteFont()
+      -- Todo: measure text height instead of hardcoding offset
+      ui.offsetCursorY(ui.measureDWriteText(state.trackName, fontSize).y - 4)
+
+      -- Artist
+      if state.artistName ~= '' then
+        ui.pushDWriteFont(DWRITE_FONT)
+          local colorThemeDimmed = _colorTheme * rgbm(0.7, 0.7, 0.7, 0.8)
+          if albumSwapTimer < 5 and state.type == 'episode' then
+            ui.dwriteDrawText(state.albumName, fontSize - 2, ui.getCursor(), colorThemeDimmed)
+          else
+            ui.dwriteDrawText(state.artistName, fontSize - 2, ui.getCursor(), colorThemeDimmed)
+          end
+        ui.popDWriteFont()
+        ui.offsetCursorY(ui.measureDWriteText(state.artistName, fontSize - 2).y)
+      end
+    end
+    local progressPercent = state.duration > 0 and (state.progress / state.duration) * 100 or 0
+    local durationMin = math.floor(state.duration / 1000 / 60)
+    local durationSec = math.floor((state.duration / 1000) % 60)
+    local progressMin = math.floor(state.progress / 1000 / 60)
+    local progressSec = math.floor((state.progress / 1000) % 60)
+
+    if spotify.extraSettings.progressBarLabel then
+      ui.pushStyleColor(ui.StyleColor.Text, _colorTheme)
+        ui.text(string.format('%d:%02d / %d:%02d', 
+          progressMin, progressSec, durationMin, durationSec))
+      ui.popStyleColor()
+    else
+      ui.offsetCursorY(margin)
+    end
+    custom_ui.drawProgressBar(progressPercent / 100, vec2(ui.availableSpaceX() - margin, ui.availableSpaceY() - margin), _colorTheme, 
+      function (percent)
+        local newProgress = percent * state.duration
+        spotify.Seek(newProgress)
+        state.progress = newProgress
+      end)
+
+  ui.endGroup()
+
+  ui.endGroup()
+end
+
+function script.windowProgressSettings(dt)
+
+  ui.textWrapped('Use global color theme:')
+  ui.sameLine()
+  if ui.checkbox('##UseGlobalColor', spotify.extraSettings.useGlobalColors) then
+    spotify.extraSettings.useGlobalColors = not spotify.extraSettings.useGlobalColors
+  end
+
+  if not spotify.extraSettings.useGlobalColors then
+    if ui.colorButton("Widget Color Theme", spotify.extraSettings.colorThemeExtra) then
+      ui.openPopup("picker_w")
+    end
+    ui.sameLine()
+    ui.text("Pick a color theme for the widget")
+  end
+
+  if ui.beginPopup("picker_w") then
+      ui.colorPicker("widget_color", spotify.extraSettings.colorThemeExtra)
+      ui.endPopup()
+  end
+
+  ui.separator()
+
+  ui.textWrapped('Show song details on progress tab:')
+  ui.sameLine()
+  if ui.checkbox('##ShowDetails', spotify.extraSettings.showSongDetails) then
+    spotify.extraSettings.showSongDetails = not spotify.extraSettings.showSongDetails
+  end
+
+  ui.separator()
+  ui.textWrapped('Show progress bar label')
+  ui.sameLine()
+  if ui.checkbox('##ShowProgressLabel', spotify.extraSettings.progressBarLabel) then
+    spotify.extraSettings.progressBarLabel = not spotify.extraSettings.progressBarLabel
+  end
+
+  ui.separator()
+  ui.textWrapped('Show progress bar background:')
+  ui.sameLine()
+  if ui.checkbox('##ProgressBarBackground', spotify.extraSettings.progressBarBackground) then
+    spotify.extraSettings.progressBarBackground = not spotify.extraSettings.progressBarBackground
+  end
+
+  if spotify.extraSettings.progressBarBackground then
+      ui.separator()
+      ui.textWrapped('Higher contrast background:')
+      ui.sameLine()
+      if ui.checkbox('##ProgressBarBackgroundInvert', spotify.extraSettings.progressBarBackgroundInvert) then
+        spotify.extraSettings.progressBarBackgroundInvert = not spotify.extraSettings.progressBarBackgroundInvert
+      end
+    
+      
+      if ui.beginPopup("picker_bg") then
+          ui.colorPicker("widget_background", spotify.extraSettings.colorThemeExtraBg)
+          ui.endPopup()
+      end
+      
+      if not spotify.extraSettings.progressBarBackgroundInvert then
+        ui.separator()
+        if ui.colorButton("Widget Background", spotify.extraSettings.colorThemeExtraBg) then
+          ui.openPopup("picker_bg")
+        end
+        ui.sameLine()
+        ui.text("Pick a color theme for the widget background")
+      end
+  end
+
+  ui.separator()
+  ui.textWrapped('Song details font size:')
+  local fontSize, f_changed = ui.slider('##SongDetailsFontSize', spotify.extraSettings.songDetailsFontSize, 10, 48, '%.0f')
+  if f_changed then
+    spotify.extraSettings.songDetailsFontSize = fontSize
+  end
+  ui.separator()
+  ui.textWrapped('Show album art')
+  ui.sameLine()
+  if ui.checkbox('##ShowAlbumArt', spotify.extraSettings.showAlbumArt) then
+    spotify.extraSettings.showAlbumArt = not spotify.extraSettings.showAlbumArt
+  end
+end
+
+local currentAlbumIndex = 1
+function script.windowAlbumSettings(dt)
+  local options = {'square', 'vinyl'}
+  
+  -- Find current selection
+  for i, option in ipairs(options) do
+    if spotify.extraSettings.albumArtMode == option then
+      currentAlbumIndex = i
+      break
+    end
+  end
+
+  ui.textWrapped('Album Art Style:')
+  local newIndex, changed = ui.combo('##AlbumArtMode', currentAlbumIndex, options)
+  if changed then
+    currentAlbumIndex = newIndex
+    spotify.extraSettings.albumArtMode = options[newIndex]
+  end
 end

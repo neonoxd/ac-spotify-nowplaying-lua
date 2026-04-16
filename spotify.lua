@@ -33,6 +33,20 @@ Spotify.appSettings = ac.storage{
   colorTheme = rgbm(1, 1, 1, 1),
   showOnHover = false,
   enableSharing = true,
+  useAlbumColor = false,
+}
+
+Spotify.extraSettings = ac.storage{
+  albumArtMode = 'square', -- or 'vinyl'
+  showSongDetails = true,
+  songDetailsFontSize = 16,
+  progressBarBackground = true,
+  progressBarBackgroundInvert = false,
+  progressBarLabel = true,
+  showAlbumArt = true,
+  useGlobalColors = true,
+  colorThemeExtra = rgbm(0, 0, 0, 1),
+  colorThemeExtraBg = rgbm(0.1, 0.1, 0.1, 0.8)
 }
 
 -- Song history stack for quick-loading previous track metadata
@@ -56,6 +70,7 @@ Spotify.playbackState = {
   volume = 0,
   queue = {},
   type = 'track', -- or 'episode'
+  dominantColor = rgbm(1, 1, 1, 1),
 }
 
 -- Load config from INI file to ac.storage
@@ -181,6 +196,7 @@ local function pushCurrentSongToHistory()
       albumArtUrl = state.albumArtUrl,
       duration = state.duration,
       trackUrl = state.trackUrl,
+      dominantColor = state.dominantColor,
     }
     table.insert(Spotify.songHistory, snapshot)
     -- Trim history if it exceeds max size
@@ -394,7 +410,7 @@ function Spotify.nextTrack()
       local json = JSON.parse(response["body"])
       local queueItems = json.queue or {}
       for i, item in ipairs(queueItems) do
-        if (i == 1) then 
+        if (i == 1) then
           local js = {}
           js.item = item
           local song = parseTrackMetadata(js)
@@ -430,6 +446,7 @@ function Spotify.prevTrack()
       Spotify.playbackState.trackUrl = prev.trackUrl
       Spotify.playbackState.albumName = prev.albumName
       Spotify.playbackState.albumArtUrl = prev.albumArtUrl
+      Spotify.playbackState.dominantColor = prev.dominantColor
       Spotify.playbackState.isPlaying = true
 
       ac.log('Spotify: Quick-loaded previous track from history: '..prev.trackName)
@@ -462,6 +479,140 @@ function Spotify.checkIsLiked(trackId, callback)
       end
       if callback then callback(false, Spotify.playbackState.isLiked) end
     end)
+  end)
+end
+
+-- Canvas for dominant color extraction (reused to avoid creating new ones)
+local colorCanvas = nil
+local colorCanvasSize = 64 -- Small size is sufficient for color sampling
+
+-- Extract dominant color from album art URL
+function Spotify.extractDominantColor(albumArtUrl, callback)
+  if not albumArtUrl or albumArtUrl == '' then
+    if callback then callback(true, 'No album art URL') end
+    return
+  end
+
+  -- Create canvas if not exists
+  if not colorCanvas then
+    colorCanvas = ui.ExtraCanvas(vec2(colorCanvasSize, colorCanvasSize))
+  end
+
+  -- Draw the album art to the canvas (CSP will fetch from URL automatically)
+  colorCanvas:clear(rgbm.colors.transparent)
+  colorCanvas:update(function()
+    ui.drawImage(albumArtUrl, vec2(0, 0), vec2(colorCanvasSize, colorCanvasSize))
+  end)
+
+  -- Access pixel data asynchronously
+  colorCanvas:accessData(function(err, data)
+    if err or not data then
+      ac.log('Spotify: Failed to access album art data: '..(err or 'unknown error'))
+      if callback then callback(true, err or 'Failed to access data') end
+      return
+    end
+
+    -- Sample colors from a grid of points (avoiding edges which might have artifacts)
+    local sampleColor = rgbm()
+    local totalR, totalG, totalB = 0, 0, 0
+    local totalWeight = 0
+    local step = math.floor(colorCanvasSize / 8) -- 8x8 sample grid
+    local margin = step -- Skip edge pixels
+
+    for x = margin, colorCanvasSize - margin - 1, step do
+      for y = margin, colorCanvasSize - margin - 1, step do
+        data:colorTo(sampleColor, x, y)
+        -- Only count pixels with some alpha (not transparent)
+        if sampleColor.mult > 0.5 then
+          local r, g, b = sampleColor.r, sampleColor.g, sampleColor.b
+          local maxC = math.max(r, g, b)
+          local minC = math.min(r, g, b)
+          
+          -- Calculate saturation (0-1)
+          local sat = 0
+          if maxC > 0 then
+            sat = (maxC - minC) / maxC
+          end
+          
+          -- Weight by saturation^2 - strongly favor vibrant colors
+          -- Add small base weight so desaturated images still work
+          local weight = 0.1 + sat * sat
+          
+          totalR = totalR + r * weight
+          totalG = totalG + g * weight
+          totalB = totalB + b * weight
+          totalWeight = totalWeight + weight
+        end
+      end
+    end
+
+    data:dispose()
+
+    if totalWeight > 0 then
+      -- Calculate weighted average color
+      local avgR = totalR / totalWeight
+      local avgG = totalG / totalWeight
+      local avgB = totalB / totalWeight
+
+      -- Convert to HSV for saturation/brightness adjustment
+      local maxC = math.max(avgR, avgG, avgB)
+      local minC = math.min(avgR, avgG, avgB)
+      local delta = maxC - minC
+
+      -- Calculate hue
+      local hue = 0
+      if delta > 0 then
+        if maxC == avgR then
+          hue = 60 * (((avgG - avgB) / delta) % 6)
+        elseif maxC == avgG then
+          hue = 60 * (((avgB - avgR) / delta) + 2)
+        else
+          hue = 60 * (((avgR - avgG) / delta) + 4)
+        end
+      end
+
+      -- Calculate saturation and value
+      local sat = maxC > 0 and (delta / maxC) or 0
+      local val = maxC
+
+      -- Boost saturation for vibrancy (1.5x, capped at 1.0)
+      sat = math.min(1.0, sat * 1.5)
+      
+      -- Ensure minimum brightness for text readability
+      val = math.max(0.5, val)
+
+      -- Convert back to RGB
+      local c = val * sat
+      local x = c * (1 - math.abs((hue / 60) % 2 - 1))
+      local m = val - c
+
+      local r1, g1, b1 = 0, 0, 0
+      if hue < 60 then
+        r1, g1, b1 = c, x, 0
+      elseif hue < 120 then
+        r1, g1, b1 = x, c, 0
+      elseif hue < 180 then
+        r1, g1, b1 = 0, c, x
+      elseif hue < 240 then
+        r1, g1, b1 = 0, x, c
+      elseif hue < 300 then
+        r1, g1, b1 = x, 0, c
+      else
+        r1, g1, b1 = c, 0, x
+      end
+
+      avgR = r1 + m
+      avgG = g1 + m
+      avgB = b1 + m
+
+      Spotify.playbackState.dominantColor = rgbm(avgR, avgG, avgB, 1)
+      --ac.log('Spotify: Dominant color extracted: R='..string.format('%.2f', avgR)..' G='..string.format('%.2f', avgG)..' B='..string.format('%.2f', avgB))
+    else
+      -- Fallback to default
+      --Spotify.playbackState.dominantColor = rgbm(0.2, 0.2, 0.2, 1)
+    end
+
+    if callback then callback(false, Spotify.playbackState.dominantColor) end
   end)
 end
 
@@ -604,10 +755,14 @@ function Spotify.getPlaybackState()
 
         Spotify.playbackState.type = song.currently_playing_type or 'track'
 
-        -- Check liked status when track changes
+        -- Check liked status and extract dominant color when track changes
         if trackChanged then
           Spotify.playbackState.isLiked = false
           Spotify.checkIsLiked(song.trackId)
+          -- Extract dominant color from album art
+          if song.albumArtUrl and song.albumArtUrl ~= '' then
+            Spotify.extractDominantColor(song.albumArtUrl)
+          end
         end
 
         -- Get Volume Data
@@ -634,6 +789,7 @@ function Spotify.clearPlaybackState()
   Spotify.playbackState.isPlaying = false
   Spotify.playbackState.duration = 0
   Spotify.playbackState.progress = 0
+  Spotify.playbackState.dominantColor = rgbm(0, 0, 0, 1)
 end
 
 -- Get config (for settings UI)

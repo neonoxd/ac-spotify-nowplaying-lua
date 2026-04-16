@@ -29,7 +29,7 @@ function custom_ui.drawProgressBar(value, size, color, onClick)
     -- Draw circle on bar
     local mouseX = ui.mouseLocalPos().x
     local circleX = math.clamp(mouseX, cursorPos.x, cursorPos.x + size.x)
-    ui.drawCircleFilled(vec2(circleX, cursorPos.y + size.y / 2), size.y, color, 16)
+    ui.drawCircleFilled(vec2(circleX, cursorPos.y + size.y / 2), size.y * 0.8, color, 16)
   end
   if ui.itemClicked(ui.MouseButton.Left) and onClick then
     local mouseX = ui.mouseLocalPos().x
@@ -43,7 +43,7 @@ local vinylDir = 1
 local vinylSpeed = 25
 local vinylSpeeds = {25, 50, 75, 100}
 function custom_ui.drawVinylAlbumArt(state, dt, size)
-  local artPath = state.albumArtUrl ~= '' and state.albumArtUrl or 'icon.png'
+  local artPath = state.albumArtUrl ~= '' and state.albumArtUrl or 'images/vinyl.png' 
 
   local cursor = ui.getCursor()
   local radius = size / 2
