@@ -65,7 +65,15 @@ if sim.isOnlineRace then
 
 end
 
+local lastStateUpdateFrame = -1
 local function updateState(dt)
+
+  local currentFrame = sim.frame
+  if currentFrame == lastStateUpdateFrame then
+    return -- Already updated this frame
+  end
+  lastStateUpdateFrame = currentFrame
+
   local state = spotify.playbackState
   -- DEBUG
   ac.debug('..trackName: ', state.trackName)
@@ -535,6 +543,7 @@ function script.windowSettings(dt)
 end
 
 function script.windowAlbum(dt)
+  updateState(dt)
   local state = spotify.playbackState
   local imageSize = math.min(ui.availableSpaceY(), ui.availableSpaceX())
   if spotify.extraSettings.albumArtMode == 'vinyl' then
@@ -549,6 +558,7 @@ function script.windowAlbum(dt)
 end
 
 function script.windowProgress(dt)
+  updateState(dt)
   local state = spotify.playbackState
   local margin = 10
   local _colorTheme = spotify.extraSettings.useGlobalColors and colorTheme or spotify.extraSettings.colorThemeExtra
