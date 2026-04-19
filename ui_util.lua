@@ -98,4 +98,99 @@ function custom_ui.drawNumberedBadge(position, number, badgeColor, textColor)
   ui.popFont()
 end
 
+local scrollStates = {}
+--[[
+  Scrolling text for text that exceeds available width
+  
+  Parameters:
+  - id: unique string identifier for this text element (used to track scroll state)
+  - text: the text to display
+  - fontSize: font size for dwriteDrawText
+  - maxWidth: maximum width before scrolling kicks in
+  - color: text color (rgbm)
+  - dt: delta time for animation
+  - font: (optional) DWrite font string, defaults to nil (uses current font)
+  - scrollSpeed: (optional) pixels per second, defaults to 30
+  - pauseDuration: (optional) seconds to pause at start/end, defaults to 2
+  
+  Returns: measured text height
+]]
+function custom_ui.drawScrollingText(id, text, fontSize, maxWidth, color, dt, font, scrollSpeed, pauseDuration)
+  scrollSpeed = scrollSpeed or 30
+  pauseDuration = pauseDuration or 2
+  
+  -- Measure text
+  local textSize
+  if font then
+    ui.pushDWriteFont(font)
+    textSize = ui.measureDWriteText(text, fontSize)
+    ui.popDWriteFont()
+  else
+    textSize = ui.measureDWriteText(text, fontSize)
+  end
+  
+  local cursor = ui.getCursor()
+  
+  -- If text fits, just draw it normally
+  if textSize.x <= maxWidth then
+    if font then ui.pushDWriteFont(font) end
+    ui.dwriteDrawText(text, fontSize, cursor, color)
+    if font then ui.popDWriteFont() end
+    return textSize.y
+  end
+  
+  -- Initialize scroll state for this id
+  if not scrollStates[id] then
+    scrollStates[id] = {
+      offset = 0,
+      direction = 1, -- 1 = scrolling left, -1 = scrolling right
+      pauseTimer = pauseDuration,
+      lastText = text,
+    }
+  end
+  
+  local state = scrollStates[id]
+  
+  -- Reset if text changed
+  if state.lastText ~= text then
+    state.offset = 0
+    state.direction = 1
+    state.pauseTimer = pauseDuration
+    state.lastText = text
+  end
+  
+  -- Calculate max scroll offset (how far we need to scroll)
+  local maxOffset = textSize.x - maxWidth
+  
+  -- Update scroll animation
+  if state.pauseTimer > 0 then
+    state.pauseTimer = state.pauseTimer - dt
+  else
+    state.offset = state.offset + scrollSpeed * dt * state.direction
+    
+    -- Reverse direction at boundaries
+    if state.offset >= maxOffset then
+      state.offset = maxOffset
+      state.direction = -1
+      state.pauseTimer = pauseDuration
+    elseif state.offset <= 0 then
+      state.offset = 0
+      state.direction = 1
+      state.pauseTimer = pauseDuration
+    end
+  end
+  
+  -- Draw with clipping
+  ui.pushClipRect(cursor, vec2(cursor.x + maxWidth, cursor.y + textSize.y + 4))
+  
+  local drawPos = vec2(cursor.x - state.offset, cursor.y)
+  if font then ui.pushDWriteFont(font) end
+  ui.dwriteDrawText(text, fontSize, drawPos, color)
+  if font then ui.popDWriteFont() end
+  
+  ui.popClipRect()
+  
+  return textSize.y
+end
+
 return custom_ui

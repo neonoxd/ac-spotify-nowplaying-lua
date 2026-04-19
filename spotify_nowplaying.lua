@@ -195,21 +195,21 @@ function script.windowMain(dt)
 
         -- Title 
         ui.pushDWriteFont(DWRITE_FONT..';Weight=Bold;')
-          ui.dwriteDrawText(state.trackName, 18, ui.getCursor(), colorTheme)
+          local scrollHeight = custom_ui.drawScrollingText('track_title_main', state.trackName, 18, ui.availableSpaceX(), colorTheme, dt)
         ui.popDWriteFont()
-        ui.offsetCursorY(26)
+        ui.offsetCursorY(scrollHeight)
 
         -- Artist
         if state.artistName ~= '' then
           ui.pushDWriteFont(DWRITE_FONT)
             local colorThemeDimmed = colorTheme * rgbm(0.7, 0.7, 0.7, 0.8)
             if albumSwapTimer < 5 and state.type == 'episode' then
-              ui.dwriteDrawText(state.albumName, 16, ui.getCursor(), colorThemeDimmed)
+              scrollHeight = custom_ui.drawScrollingText('track_album_main', state.albumName, 16, ui.availableSpaceX(), colorThemeDimmed, dt)
             else
-              ui.dwriteDrawText(state.artistName, 16, ui.getCursor(), colorThemeDimmed)
+              scrollHeight = custom_ui.drawScrollingText('track_artist_main', state.artistName, 16, ui.availableSpaceX(), colorThemeDimmed, dt)
             end
           ui.popDWriteFont()
-          ui.offsetCursorY(24)
+          ui.offsetCursorY(scrollHeight)
         end
 
         -- Display play progress
@@ -607,19 +607,18 @@ function script.windowProgress(dt)
       ui.offsetCursorY(margin - 4)
       -- Title 
       ui.pushDWriteFont(DWRITE_FONT..';Weight=Bold;')
-        ui.dwriteDrawText(state.trackName, fontSize, ui.getCursor(), _colorTheme)
+      local scrollHeight = custom_ui.drawScrollingText('track_title', state.trackName, fontSize, ui.availableSpaceX() - margin, _colorTheme, dt)
       ui.popDWriteFont()
-      -- Todo: measure text height instead of hardcoding offset
-      ui.offsetCursorY(ui.measureDWriteText(state.trackName, fontSize).y - 4)
+      ui.offsetCursorY(scrollHeight - 4)
 
       -- Artist
       if state.artistName ~= '' then
         ui.pushDWriteFont(DWRITE_FONT)
           local colorThemeDimmed = _colorTheme * rgbm(0.7, 0.7, 0.7, 0.8)
           if albumSwapTimer < 5 and state.type == 'episode' then
-            ui.dwriteDrawText(state.albumName, fontSize - 2, ui.getCursor(), colorThemeDimmed)
+            scrollHeight = custom_ui.drawScrollingText('track_album', state.albumName, fontSize - 2, ui.availableSpaceX() - margin, colorThemeDimmed, dt)
           else
-            ui.dwriteDrawText(state.artistName, fontSize - 2, ui.getCursor(), colorThemeDimmed)
+            scrollHeight = custom_ui.drawScrollingText('track_artist', state.artistName, fontSize - 2, ui.availableSpaceX() - margin, colorThemeDimmed, dt)
           end
         ui.popDWriteFont()
         ui.offsetCursorY(ui.measureDWriteText(state.artistName, fontSize - 2).y)
