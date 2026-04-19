@@ -28,15 +28,15 @@ local oauthConfig = ac.storage{
   tokenExpiry = 0,
 }
 
-Spotify.appSettings = ac.storage{
+Spotify.appSettings = ac.storage({
   showControls = false,
   colorTheme = rgbm(1, 1, 1, 1),
   showOnHover = false,
   enableSharing = true,
   useAlbumColor = false,
-}
+}, 'spotify_appSettings')
 
-Spotify.extraSettings = ac.storage{
+Spotify.extraSettings = ac.storage({
   albumArtMode = 'square', -- or 'vinyl'
   showSongDetails = true,
   songDetailsFontSize = 16,
@@ -45,9 +45,9 @@ Spotify.extraSettings = ac.storage{
   progressBarLabel = true,
   showAlbumArt = true,
   useGlobalColors = true,
-  colorThemeExtra = rgbm(0, 0, 0, 1),
-  colorThemeExtraBg = rgbm(0.1, 0.1, 0.1, 0.8)
-}
+  widgetColorTheme = rgbm(1, 1, 1, 1),
+  widgetColorThemeBg = rgbm(0.1, 0.1, 0.1, 0.8),
+}, 'spotify_extraSettings')
 
 -- Song history stack for quick-loading previous track metadata
 Spotify.songHistory = {}

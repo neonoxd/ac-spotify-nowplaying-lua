@@ -536,7 +536,10 @@ function script.windowSettings(dt)
   end
 
   if ui.beginPopup("picker") then
-      ui.colorPicker("picker_color", spotify.appSettings.colorTheme)
+      local changed = ui.colorPicker("picker_color", spotify.appSettings.colorTheme)
+      if changed then
+          spotify.appSettings.colorTheme = spotify.appSettings.colorTheme
+      end
       ui.endPopup()
   end
 
@@ -559,9 +562,11 @@ end
 
 function script.windowProgress(dt)
   updateState(dt)
+  ac.debug('___.widgetColorTheme: ', spotify.extraSettings.widgetColorTheme)
+  ac.debug('___.widgetColorThemeBg: ', spotify.extraSettings.widgetColorThemeBg)
   local state = spotify.playbackState
   local margin = 10
-  local _colorTheme = spotify.extraSettings.useGlobalColors and colorTheme or spotify.extraSettings.colorThemeExtra
+  local _colorTheme = spotify.extraSettings.useGlobalColors and colorTheme or spotify.extraSettings.widgetColorTheme
   
   -- Draw a rounded square for background if enabled
   if spotify.extraSettings.progressBarBackground then
@@ -572,7 +577,7 @@ function script.windowProgress(dt)
     local invertedColor = luminance > 0.7
       and rgbm(0, 0, 0, 0.6)      -- dark background
       or rgbm(1, 1, 1, 0.15)      -- light background
-    local bgColor = spotify.extraSettings.progressBarBackgroundInvert and invertedColor or spotify.extraSettings.colorThemeExtraBg
+    local bgColor = spotify.extraSettings.progressBarBackgroundInvert and invertedColor or spotify.extraSettings.widgetColorThemeBg
 
     ui.drawRectFilled(cursorPos, vec2(cursorPos.x + size.x, cursorPos.y + size.y), bgColor, 8)
   end
@@ -655,7 +660,7 @@ function script.windowProgressSettings(dt)
   end
 
   if not spotify.extraSettings.useGlobalColors then
-    if ui.colorButton("Widget Color Theme", spotify.extraSettings.colorThemeExtra) then
+    if ui.colorButton("Widget Color Theme", spotify.extraSettings.widgetColorTheme) then
       ui.openPopup("picker_w")
     end
     ui.sameLine()
@@ -663,7 +668,10 @@ function script.windowProgressSettings(dt)
   end
 
   if ui.beginPopup("picker_w") then
-      ui.colorPicker("widget_color", spotify.extraSettings.colorThemeExtra)
+      local changed = ui.colorPicker("widget_color", spotify.extraSettings.widgetColorTheme)
+      if changed then
+          spotify.extraSettings.widgetColorTheme = spotify.extraSettings.widgetColorTheme
+      end
       ui.endPopup()
   end
 
@@ -699,13 +707,16 @@ function script.windowProgressSettings(dt)
     
       
       if ui.beginPopup("picker_bg") then
-          ui.colorPicker("widget_background", spotify.extraSettings.colorThemeExtraBg)
+          local changed = ui.colorPicker("widget_background", spotify.extraSettings.widgetColorThemeBg)
+          if changed then
+              spotify.extraSettings.widgetColorThemeBg = spotify.extraSettings.widgetColorThemeBg
+          end
           ui.endPopup()
       end
       
       if not spotify.extraSettings.progressBarBackgroundInvert then
         ui.separator()
-        if ui.colorButton("Widget Background", spotify.extraSettings.colorThemeExtraBg) then
+        if ui.colorButton("Widget Background", spotify.extraSettings.widgetColorThemeBg) then
           ui.openPopup("picker_bg")
         end
         ui.sameLine()
