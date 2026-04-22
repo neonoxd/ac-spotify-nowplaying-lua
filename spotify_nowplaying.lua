@@ -41,7 +41,7 @@ local albumSwapTimer = 0
 
 local chatMessageEvent = nil
 local sim = ac.getSim()
-if sim.isOnlineRace then
+if sim.directMessagingAvailable then
 
   chatMessageEvent = ac.OnlineEvent({
     spotifySongId = ac.StructItem.string(),
@@ -263,7 +263,7 @@ function script.windowMain(dt)
           end
           ui.popFont()
 
-          if spotify.appSettings.enableSharing and sim.isOnlineRace then
+          if spotify.appSettings.enableSharing and sim.directMessagingAvailable then
             -- Align Right
             -- Share button
             ui.sameLine()
