@@ -560,7 +560,11 @@ function script.windowAlbum(dt)
   end
 end
 
+local progress_pos = vec2(0, 0)
+local progress_size = vec2(0, 0)
 function script.windowProgress(dt)
+  progress_pos = ui.windowPos() + vec2(0, ui.windowSize().y)
+  progress_size = ui.windowSize()
   updateState(dt)
   ac.debug('___.widgetColorTheme: ', spotify.extraSettings.widgetColorTheme)
   ac.debug('___.widgetColorThemeBg: ', spotify.extraSettings.widgetColorThemeBg)
@@ -755,4 +759,114 @@ function script.windowAlbumSettings(dt)
     currentAlbumIndex = newIndex
     spotify.extraSettings.albumArtMode = options[newIndex]
   end
+end
+
+function script.drawControls(dt)
+
+  if ac.isWindowCollapsed('spotify_progress') or not ac.isWindowOpen('spotify_progress') then
+    return
+  end
+
+  -- Only show controls when hovering near the progress_pos
+  local m_pos = ui.mousePos()
+  local to_pos = progress_pos + vec2(progress_size.x / 2, 4)
+  local dist = m_pos:distance(to_pos)
+
+  if dist > 250 then
+    return
+  end
+
+  local show_perc = math.min(300 - dist, 100) / 100
+
+  local state = spotify.playbackState
+
+  if state.trackName == 'Nothing playing' then
+    return
+  end
+
+  local btn_size_large = vec2(32, 32)
+  local theme = spotify.extraSettings.widgetColorThemeBg
+  local color = rgbm(1, 1, 1, show_perc)
+
+  ui.beginGroup()
+    -- Previous, Play/Pause, Next
+    local rev_perc = 1 - show_perc
+    local cur = progress_pos + vec2(progress_size.x / 2 - (btn_size_large.x * 4), 4)
+    cur = cur - vec2(0, 10 * rev_perc)
+
+    custom_ui.drawHitTestButton(cur + vec2(0, 4), vec2(24, 24),
+      function (p0, p1)
+        if state.isLiked then
+          ui.drawImage('controls/unlike.png', p0, p1, color)
+        else
+          ui.drawImage('controls/like.png', p0, p1, color)
+        end
+      end,
+      function ()
+        if state.isLiked then
+          spotify.unlikeTrack()
+        else
+          spotify.likeTrack()
+        end
+      end)
+
+    cur = cur + vec2(btn_size_large.x + 10, 0)
+
+    custom_ui.drawHitTestButton(cur, btn_size_large,
+      function (p0, p1)
+        ui.drawImage('controls/prev.png', p0, p1, color)
+      end,
+      function ()
+        spotify.prevTrack()
+      end)
+
+    -- Move Cursor
+    cur = cur + vec2(btn_size_large.x + 10, 0)
+
+    if state.isPlaying then
+      custom_ui.drawHitTestButton(cur, btn_size_large,
+        function (p0, p1)
+          ui.drawImage('controls/pause.png', p0, p1, color)
+        end,
+        function ()
+          spotify.pause()
+          state.isPlaying = false
+        end)
+    else
+      custom_ui.drawHitTestButton(cur, btn_size_large,
+        function (p0, p1)
+          ui.drawImage('controls/play.png', p0, p1, color)
+        end,
+        function ()
+          spotify.play()
+          state.isPlaying = true
+        end)
+    end
+
+    -- Move Cursor
+    cur = cur + vec2(btn_size_large.x + 10, 0)
+
+    custom_ui.drawHitTestButton(cur, btn_size_large,
+      function (p0, p1)
+        ui.drawImage('controls/next.png', p0, p1, color)
+      end,
+      function ()
+        spotify.nextTrack()
+      end)
+
+    -- Move Cursor
+    cur = cur + vec2(btn_size_large.x + 20, 12)
+    ui.setCursor(cur)
+    -- volume slider
+    local volumePercent = state.volume / 100
+    custom_ui.drawProgressBarHitTest(volumePercent, vec2(100, 6), color,
+      function (percent)
+        local newVolume = percent * 100
+        volumeTarget = newVolume
+        volumeChanged = true
+        state.volume = newVolume
+      end)
+
+
+  ui.endGroup()
 end

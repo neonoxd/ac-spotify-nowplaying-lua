@@ -8,7 +8,6 @@ local bgGray = rgbm(0.25, 0.22, 0.22, 1)
 local cursorPos = vec2(0, 0)
 local progressVect2 = vec2(0, 0)
 local progressSizeVect2 = vec2(0, 0)
-
 function custom_ui.drawProgressBar(value, size, color, onClick)
   cursorPos:set(ui.getCursor())
   ui.drawRectFilled(cursorPos, cursorPos + size, bgGray, 3)
@@ -36,6 +35,50 @@ function custom_ui.drawProgressBar(value, size, color, onClick)
     local percent = math.clamp((mouseX - cursorPos.x) / size.x, 0, 1)
     onClick(percent)
   end
+end
+
+-- Callback-safe progress bar for UI callbacks (manual hit-test, no invisibleButton).
+function custom_ui.drawProgressBarHitTest(value, size, color, onClick, options)
+  options = options or {}
+
+  local barPos = ui.getCursor()
+  local barEnd = barPos + size
+
+  ui.drawRectFilled(barPos, barEnd, bgGray, options.rounding or 3)
+
+  local progress = math.clamp(value or 0, 0, 1)
+  if progress > 0 then
+    local fillEnd = vec2(barPos.x + size.x * progress, barPos.y + size.y)
+    ui.drawRectFilled(barPos, fillEnd, color, options.rounding or 3)
+  end
+
+  local mouse = ui.mouseLocalPos()
+  local hasMouse = mouse.x >= 0 and mouse.y >= 0
+  local hovered = hasMouse
+    and mouse.x >= barPos.x and mouse.x <= barEnd.x
+    and mouse.y >= barPos.y and mouse.y <= barEnd.y
+
+  if hovered then
+    ui.setMouseCursor(ui.MouseCursor.Hand)
+
+    if options.showHandle ~= false then
+      local circleX = math.clamp(mouse.x, barPos.x, barEnd.x)
+      ui.drawCircleFilled(vec2(circleX, barPos.y + size.y / 2), size.y * 0.8, color, 16)
+    end
+
+    if ui.mouseClicked(ui.MouseButton.Left) and onClick then
+      local percent = math.clamp((mouse.x - barPos.x) / size.x, 0, 1)
+      onClick(percent, hovered)
+    end
+
+    if ui.mouseDown(ui.MouseButton.Left) and options.onDrag then
+      local percent = math.clamp((mouse.x - barPos.x) / size.x, 0, 1)
+      options.onDrag(percent, hovered)
+    end
+  end
+
+  ui.offsetCursorY(size.y + (options.spacingY or 10))
+  return hovered
 end
 
 local vinylAngle = 0
@@ -191,6 +234,32 @@ function custom_ui.drawScrollingText(id, text, fontSize, maxWidth, color, dt, fo
   ui.popClipRect()
   
   return textSize.y
+end
+
+-- Manual hit-test button for draw callbacks where regular UI widgets might not receive clicks.
+function custom_ui.drawHitTestButton(position, size, drawFn, onClick, options)
+  options = options or {}
+
+  local p1 = vec2(position.x + size.x, position.y + size.y)
+  local mouse = ui.mouseLocalPos()
+  local hasMouse = mouse.x >= 0 and mouse.y >= 0
+  local hovered = hasMouse
+    and mouse.x >= position.x and mouse.x <= p1.x
+    and mouse.y >= position.y and mouse.y <= p1.y
+  local pressed = hovered and ui.mouseDown(ui.MouseButton.Left)
+
+  if drawFn then
+    drawFn(position, p1, hovered, pressed, options)
+  end
+
+  if hovered then
+    ui.setMouseCursor(ui.MouseCursor.Hand)
+    if ui.mouseClicked(ui.MouseButton.Left) and onClick then
+      onClick(position, p1, mouse)
+    end
+  end
+
+  return hovered, pressed
 end
 
 return custom_ui

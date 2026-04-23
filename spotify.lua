@@ -56,7 +56,7 @@ Spotify.maxHistorySize = 20
 -- Playback state
 Spotify.playbackState = {
   trackName = 'Nothing playing',
-  artistName = '',
+  artistName = 'N/A',
   albumName = '',
   albumArtUrl = '',
   isPlaying = false,
@@ -732,7 +732,7 @@ function Spotify.getPlaybackState()
         -- Handle empty response / (no track playing)
         if not responseBody or responseBody == '' then
           Spotify.playbackState.trackName = 'Nothing playing'
-          Spotify.playbackState.artistName = ''
+          Spotify.playbackState.artistName = 'N/A'
           Spotify.playbackState.albumName = ''
           Spotify.playbackState.isPlaying = false
           return
@@ -788,7 +788,7 @@ end
 -- Clear playback state (used when auth fails or no track playing)
 function Spotify.clearPlaybackState()
   Spotify.playbackState.trackName = 'Nothing playing'
-  Spotify.playbackState.artistName = ''
+  Spotify.playbackState.artistName = 'N/A'
   Spotify.playbackState.albumName = ''
   Spotify.playbackState.albumArtUrl = ''
   Spotify.playbackState.isPlaying = false
