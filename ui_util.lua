@@ -237,9 +237,8 @@ function custom_ui.drawScrollingText(id, text, fontSize, maxWidth, color, dt, fo
 end
 
 -- Manual hit-test button for draw callbacks where regular UI widgets might not receive clicks.
-function custom_ui.drawHitTestButton(position, size, drawFn, onClick, options)
-  options = options or {}
-
+function custom_ui.drawHitTestButton(position, size, drawFn, onClick)
+  
   local p1 = vec2(position.x + size.x, position.y + size.y)
   local mouse = ui.mouseLocalPos()
   local hasMouse = mouse.x >= 0 and mouse.y >= 0
@@ -249,7 +248,7 @@ function custom_ui.drawHitTestButton(position, size, drawFn, onClick, options)
   local pressed = hovered and ui.mouseDown(ui.MouseButton.Left)
 
   if drawFn then
-    drawFn(position, p1, hovered, pressed, options)
+    drawFn(position, p1, hovered, pressed)
   end
 
   if hovered then

@@ -776,8 +776,6 @@ function script.drawControls(dt)
     return
   end
 
-  local show_perc = math.min(300 - dist, 100) / 100
-
   local state = spotify.playbackState
 
   if state.trackName == 'Nothing playing' then
@@ -785,11 +783,11 @@ function script.drawControls(dt)
   end
 
   local btn_size_large = vec2(32, 32)
-  local theme = spotify.extraSettings.widgetColorThemeBg
+  local show_perc = math.min(300 - dist, 100) / 100
   local color = rgbm(1, 1, 1, show_perc)
+  local padding = 10
 
   ui.beginGroup()
-    -- Previous, Play/Pause, Next
     local rev_perc = 1 - show_perc
     local cur = progress_pos + vec2(progress_size.x / 2 - (btn_size_large.x * 4), 4)
     cur = cur - vec2(0, 10 * rev_perc)
@@ -809,8 +807,8 @@ function script.drawControls(dt)
           spotify.likeTrack()
         end
       end)
-
-    cur = cur + vec2(btn_size_large.x + 10, 0)
+    -- Move Cursor
+    cur = cur + vec2(btn_size_large.x + padding, 0)
 
     custom_ui.drawHitTestButton(cur, btn_size_large,
       function (p0, p1)
@@ -819,32 +817,28 @@ function script.drawControls(dt)
       function ()
         spotify.prevTrack()
       end)
-
     -- Move Cursor
-    cur = cur + vec2(btn_size_large.x + 10, 0)
+    cur = cur + vec2(btn_size_large.x + padding, 0)
 
-    if state.isPlaying then
-      custom_ui.drawHitTestButton(cur, btn_size_large,
-        function (p0, p1)
+    custom_ui.drawHitTestButton(cur, btn_size_large,
+      function (p0, p1)
+        if state.isPlaying then
           ui.drawImage('controls/pause.png', p0, p1, color)
-        end,
-        function ()
+        else
+          ui.drawImage('controls/play.png', p0, p1, color)
+        end
+      end,
+      function ()
+        if state.isPlaying then
           spotify.pause()
           state.isPlaying = false
-        end)
-    else
-      custom_ui.drawHitTestButton(cur, btn_size_large,
-        function (p0, p1)
-          ui.drawImage('controls/play.png', p0, p1, color)
-        end,
-        function ()
+        else
           spotify.play()
           state.isPlaying = true
-        end)
-    end
-
+        end
+      end)
     -- Move Cursor
-    cur = cur + vec2(btn_size_large.x + 10, 0)
+    cur = cur + vec2(btn_size_large.x + padding, 0)
 
     custom_ui.drawHitTestButton(cur, btn_size_large,
       function (p0, p1)
@@ -853,11 +847,11 @@ function script.drawControls(dt)
       function ()
         spotify.nextTrack()
       end)
-
     -- Move Cursor
-    cur = cur + vec2(btn_size_large.x + 20, 12)
+    cur = cur + vec2(btn_size_large.x + padding + 10, 12)
     ui.setCursor(cur)
-    -- volume slider
+
+    -- Volume slider
     local volumePercent = state.volume / 100
     custom_ui.drawProgressBarHitTest(volumePercent, vec2(100, 6), color,
       function (percent)
@@ -866,7 +860,6 @@ function script.drawControls(dt)
         volumeChanged = true
         state.volume = newVolume
       end)
-
 
   ui.endGroup()
 end
